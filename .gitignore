@@ -1,0 +1,12 @@
+dataset/
+checkpoints/
+logs/
+torch_hub/
+*.pth
+*.zip
+*.backup_*
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+result*.csv
+.trae/
