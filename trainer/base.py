@@ -148,6 +148,7 @@ class BaseTrainer:
         self.logger = TrainingLogger()
         self._oom_retry_count = 0
         self._original_batch_size = config.batch_size
+        self._stable_batch_size = None
 
     def _setup_optimizer(self, backbone_params, other_params):
         return SGD([
@@ -195,6 +196,7 @@ class BaseTrainer:
                     old_bs = config.batch_size
                     config.batch_size = max(int(config.batch_size * 0.75), 16)
                     config.grad_accum_steps = max(self._original_batch_size // config.batch_size, 1)
+                    self._stable_batch_size = None
                     self.logger.logger.warning(
                         f'[OOM] Reducing batch_size {old_bs} -> {config.batch_size}, '
                         f'grad_accum_steps={config.grad_accum_steps} (retry {self._oom_retry_count})')
@@ -204,8 +206,11 @@ class BaseTrainer:
                 else:
                     raise
             self._oom_retry_count = 0
-            if config.batch_size < self._original_batch_size:
-                new_bs = min(config.batch_size + 16, self._original_batch_size)
+            if self._stable_batch_size is None:
+                self._stable_batch_size = config.batch_size
+                self.logger.logger.info(f'[STABLE] batch_size={config.batch_size} confirmed stable')
+            if config.batch_size < self._stable_batch_size:
+                new_bs = min(config.batch_size + 8, self._stable_batch_size)
                 if new_bs != config.batch_size:
                     config.batch_size = new_bs
                     config.grad_accum_steps = max(self._original_batch_size // config.batch_size, 1)

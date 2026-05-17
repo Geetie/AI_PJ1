@@ -26,7 +26,7 @@ def _auto_batch_size():
     elif total_vram_mb >= 24000:
         return 144
     elif total_vram_mb >= 22000:
-        return 80
+        return 72
     elif total_vram_mb >= 16000:
         return 48
     elif total_vram_mb >= 8000:
