@@ -174,9 +174,9 @@ class MultiHeadTrainer(BaseTrainer):
                     if mask.sum() > 0:
                         if use_cutmix:
                             bbox_loss_a = F.smooth_l1_loss(
-                                pred_bboxes[h][mask_a > 0], bbox_a[:, h, :][mask_a > 0])
+                                pred_bboxes[h][mask_a[:, h] > 0], bbox_a[:, h, :][mask_a[:, h] > 0])
                             bbox_loss_b = F.smooth_l1_loss(
-                                pred_bboxes[h][mask_b > 0], bbox_b[:, h, :][mask_b > 0])
+                                pred_bboxes[h][mask_b[:, h] > 0], bbox_b[:, h, :][mask_b[:, h] > 0])
                             bbox_loss_h = lam * bbox_loss_a + (1 - lam) * bbox_loss_b
                         else:
                             bbox_loss_h = F.smooth_l1_loss(
