@@ -25,8 +25,10 @@ def _auto_batch_size():
         return 192
     elif total_vram_mb >= 24000:
         return 144
+    elif total_vram_mb >= 22000:
+        return 64
     elif total_vram_mb >= 16000:
-        return 96
+        return 48
     elif total_vram_mb >= 8000:
         return 64
     return 32
@@ -83,6 +85,7 @@ class Config:
     use_char_level_acc = True
     early_stopping_patience = 15
     aux_loss_weight = 0.3
+    grad_accum_steps = 4
 
 
 config = Config()

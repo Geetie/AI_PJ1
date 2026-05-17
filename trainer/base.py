@@ -147,6 +147,7 @@ class BaseTrainer:
         self.early_stop_triggered = False
         self.logger = TrainingLogger()
         self._oom_retry_count = 0
+        self._original_batch_size = config.batch_size
 
     def _setup_optimizer(self, backbone_params, other_params):
         return SGD([
@@ -192,15 +193,26 @@ class BaseTrainer:
                 if 'out of memory' in str(e).lower() and self._oom_retry_count < 3:
                     self._oom_retry_count += 1
                     old_bs = config.batch_size
-                    config.batch_size = max(config.batch_size // 2, 16)
+                    config.batch_size = max(int(config.batch_size * 0.75), 16)
+                    config.grad_accum_steps = max(self._original_batch_size // config.batch_size, 1)
                     self.logger.logger.warning(
-                        f'[OOM] Reducing batch_size {old_bs} -> {config.batch_size} (retry {self._oom_retry_count})')
+                        f'[OOM] Reducing batch_size {old_bs} -> {config.batch_size}, '
+                        f'grad_accum_steps={config.grad_accum_steps} (retry {self._oom_retry_count})')
                     t.cuda.empty_cache()
                     self._rebuild_dataloaders()
                     continue
                 else:
                     raise
             self._oom_retry_count = 0
+            if config.batch_size < self._original_batch_size:
+                new_bs = min(config.batch_size + 16, self._original_batch_size)
+                if new_bs != config.batch_size:
+                    config.batch_size = new_bs
+                    config.grad_accum_steps = max(self._original_batch_size // config.batch_size, 1)
+                    self.logger.logger.info(
+                        f'[RECOVER] Increasing batch_size to {config.batch_size}, '
+                        f'grad_accum_steps={config.grad_accum_steps}')
+                    self._rebuild_dataloaders()
             self.lr_scheduler.step()
             current_lr = self.optimizer.param_groups[0]['lr']
 

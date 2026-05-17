@@ -143,7 +143,8 @@ class MultiHeadTrainer(BaseTrainer):
                 lam = 1.0
                 use_cutmix = False
 
-            self.optimizer.zero_grad()
+            if (i + 1) % config.grad_accum_steps == 1:
+                self.optimizer.zero_grad()
 
             with autocast('cuda', enabled=self.use_amp):
                 pred, pred_bboxes, attn_maps, head_cls_outs = self.model.forward_with_attn(img, gt_bboxes=bbox_target)
@@ -200,13 +201,17 @@ class MultiHeadTrainer(BaseTrainer):
                             aux_loss_h = self.head_criteria[h](head_cls_outs[h], label[:, h])
                             aux_loss = aux_loss + (aux_loss_h * valid_mask).sum() / valid_mask.sum()
                 loss = loss + config.aux_loss_weight * aux_loss
+                loss = loss / config.grad_accum_steps
 
             self.scaler.scale(loss).backward()
-            self.scaler.unscale_(self.optimizer)
-            t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-            self.ema.update(self.model)
+
+            if (i + 1) % config.grad_accum_steps == 0 or (i + 1) == len(tbar):
+                self.scaler.unscale_(self.optimizer)
+                t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                self.optimizer.zero_grad()
+                self.ema.update(self.model)
             total_loss += loss.item()
             batch_time = time.time() - batch_start
             batch_start = time.time()
