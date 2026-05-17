@@ -17,7 +17,8 @@ def _auto_batch_size():
     if not t.cuda.is_available():
         return 64
     try:
-        total_vram_mb = t.cuda.get_device_properties(0).total_mem / (1024 * 1024)
+        props = t.cuda.get_device_properties(0)
+        total_vram_mb = getattr(props, 'total_mem', getattr(props, 'total_memory', 0)) / (1024 * 1024)
     except RuntimeError:
         return 128
     if total_vram_mb >= 45000:
