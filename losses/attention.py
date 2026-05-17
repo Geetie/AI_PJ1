@@ -3,23 +3,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def generate_gaussian_attn_target(bbox_target, bbox_mask, feat_h, feat_w, device='cpu'):
-    B, N, _ = bbox_target.shape
-    grid_y = t.arange(feat_h, device=device, dtype=t.float32).view(1, 1, feat_h, 1) / feat_h
-    grid_x = t.arange(feat_w, device=device, dtype=t.float32).view(1, 1, 1, feat_w) / feat_w
-    cx = bbox_target[:, :, 0].unsqueeze(-1).unsqueeze(-1)
-    cy = bbox_target[:, :, 1].unsqueeze(-1).unsqueeze(-1)
-    bw = bbox_target[:, :, 2].clamp(min=0.02).unsqueeze(-1).unsqueeze(-1)
-    bh = bbox_target[:, :, 3].clamp(min=0.02).unsqueeze(-1).unsqueeze(-1)
+def compute_single_gaussian_kl(attn_single, cx, cy, bw, bh, h, w):
+    """高效计算单张 attention map 与单张高斯 target 的 KL 散度，避免大张量"""
+    grid_y = t.arange(h, device=attn_single.device, dtype=t.float32).view(1, h, 1) / h
+    grid_x = t.arange(w, device=attn_single.device, dtype=t.float32).view(1, 1, w) / w
     sigma_x = bw / 2.5
     sigma_y = bh / 2.5
-    gauss = t.exp(-((grid_x - cx) ** 2 / (2 * sigma_x ** 2) +
-                    (grid_y - cy) ** 2 / (2 * sigma_y ** 2)))
-    mask_expand = bbox_mask.unsqueeze(-1).unsqueeze(-1)
-    gauss = gauss * mask_expand
-    s = gauss.sum(dim=(2, 3), keepdim=True).clamp(min=1e-8)
+    gauss = t.exp(-((grid_x - cx.view(-1, 1, 1)) ** 2 / (2 * sigma_x.view(-1, 1, 1) ** 2) +
+                    (grid_y - cy.view(-1, 1, 1)) ** 2 / (2 * sigma_y.view(-1, 1, 1) ** 2)))
+    s = gauss.sum(dim=(1, 2), keepdim=True).clamp(min=1e-8)
     gauss = gauss / s
-    return gauss
+    return F.kl_div(attn_single.clamp(min=1e-8).log(), gauss, reduction='batchmean')
 
 
 class AttentionSupervisionLoss(nn.Module):
@@ -31,7 +25,6 @@ class AttentionSupervisionLoss(nn.Module):
             return t.tensor(0.0, device=bbox_target.device, requires_grad=True)
         B, N, _ = bbox_target.shape
         H, W = attn_maps[0].shape[2], attn_maps[0].shape[3]
-        gt_gauss = generate_gaussian_attn_target(bbox_target, bbox_mask, H, W, device=attn_maps[0].device)
         loss = t.tensor(0.0, device=bbox_target.device)
         count = 0
         for h in range(min(len(attn_maps), N)):
@@ -40,8 +33,13 @@ class AttentionSupervisionLoss(nn.Module):
                 continue
             attn = attn_maps[h].squeeze(1)
             pred_h = attn[mask]
-            gt_h = gt_gauss[mask, h]
-            loss = loss + F.kl_div(pred_h.clamp(min=1e-8).log(), gt_h, reduction='batchmean')
+            cx = bbox_target[mask, h, 0]
+            cy = bbox_target[mask, h, 1]
+            bw = bbox_target[mask, h, 2].clamp(min=0.02)
+            bh = bbox_target[mask, h, 3].clamp(min=0.02)
+            # 逐样本计算，避免 [B,N,H,W] 大张量
+            kl_h = compute_single_gaussian_kl(pred_h, cx, cy, bw, bh, H, W)
+            loss = loss + kl_h
             count += 1
         if count == 0:
             return t.tensor(0.0, device=bbox_target.device, requires_grad=True)
