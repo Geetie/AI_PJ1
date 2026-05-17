@@ -4,7 +4,7 @@ import torch as t
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR = '/mnt/workspace' if os.path.exists('/mnt/workspace') else SCRIPT_DIR
+BASE_DIR = SCRIPT_DIR
 
 IS_MODELSCOPE = os.path.exists('/mnt/workspace')
 
