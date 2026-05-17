@@ -165,7 +165,8 @@ class MultiHeadTrainer(BaseTrainer):
 
                 div_loss = attention_diversity_loss(attn_maps)
                 ord_loss = spatial_ordering_loss(attn_maps, bbox_preds=pred_bboxes, bbox_mask=bbox_mask)
-                attn_sup_loss = self.attn_supervision(attn_maps, bbox_target, bbox_mask)
+                # attn_sup_loss = self.attn_supervision(attn_maps, bbox_target, bbox_mask)
+                attn_sup_loss = t.tensor(0.0, device=self.device)
                 bbox_loss = t.tensor(0.0, device=self.device)
                 valid_bbox_sum = (bbox_target * bbox_mask.unsqueeze(-1)).sum(dim=1)
                 valid_bbox_count = bbox_mask.sum(dim=1, keepdim=True).clamp(min=1)
