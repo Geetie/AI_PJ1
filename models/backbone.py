@@ -33,8 +33,8 @@ class FPNBackbone(nn.Module):
         self.layer3 = backbone.layer3
         self.layer4 = backbone.layer4
         self.l1_reduce = nn.Sequential(
-            nn.Conv2d(256, 128, 1, bias=False),
-            nn.BatchNorm2d(128),
+            nn.Conv2d(256, 256, 1, bias=False),
+            nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
         )
         self.l2_reduce = nn.Sequential(
@@ -63,12 +63,12 @@ class FPNBackbone(nn.Module):
             nn.ReLU(inplace=True),
         )
         self.smooth_p1 = nn.Sequential(
-            nn.Conv2d(128, 128, 3, padding=1, bias=False),
-            nn.BatchNorm2d(128),
+            nn.Conv2d(256, 256, 3, padding=1, bias=False),
+            nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
         )
         self.fuse = nn.Sequential(
-            nn.Conv2d(896, config.multiscale_feat_dim, 3, padding=1, bias=False),
+            nn.Conv2d(1024, config.multiscale_feat_dim, 3, padding=1, bias=False),
             nn.BatchNorm2d(config.multiscale_feat_dim),
             nn.ReLU(inplace=True),
         )
