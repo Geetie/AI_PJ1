@@ -7,6 +7,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = SCRIPT_DIR
 
 IS_MODELSCOPE = os.path.exists('/mnt/workspace')
+DATA_ROOT = '/mnt/workspace' if IS_MODELSCOPE else SCRIPT_DIR
 
 NUM_WORKERS = min(max(multiprocessing.cpu_count() - 2, 2), 8) if IS_MODELSCOPE else (min(multiprocessing.cpu_count() - 1, 8) if os.name != 'nt' else 0)
 
@@ -86,8 +87,8 @@ class Config:
 
 config = Config()
 
-CSV_PATH = os.path.join(BASE_DIR, 'mchar_data_list_0515.csv')
-dataset_path = os.path.join(BASE_DIR, 'dataset')
+CSV_PATH = os.path.join(SCRIPT_DIR, 'mchar_data_list_0515.csv')
+dataset_path = os.path.join(DATA_ROOT, 'dataset')
 
 data_dir = {
     'train_data': os.path.join(dataset_path, 'mchar_train') + os.sep,
@@ -98,4 +99,4 @@ data_dir = {
     'submit_file': os.path.join(dataset_path, 'mchar_sample_submit_A.csv'),
 }
 
-t.hub.set_dir(os.path.join(BASE_DIR, 'torch_hub'))
+t.hub.set_dir(os.path.join(DATA_ROOT, 'torch_hub'))
