@@ -256,6 +256,12 @@ class BaseTrainer:
                     self.logger.log_save(save_path)
                     self.best_acc = acc
                     self.best_checkpoint_path = save_path
+                elif (epoch + 1) % 10 == 0:
+                    os.makedirs(config.checkpoints, exist_ok=True)
+                    save_path = os.path.join(config.checkpoints,
+                                             'epoch-%s-%d-acc-%.2f.pth' % (self._checkpoint_prefix, epoch + 1, acc * 100))
+                    self.save_model(save_path, save_opt=True)
+                    self.logger.log_save(save_path)
 
     def save_model(self, save_path, save_opt=False, save_config=False):
         if self.ema is not None:
