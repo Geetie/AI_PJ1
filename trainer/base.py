@@ -145,6 +145,7 @@ class BaseTrainer:
         self.best_acc = 0
         self.best_checkpoint_path = ''
         self.train_log = []
+        self._current_epoch = 0
         self.patience_counter = 0
         self.early_stop_triggered = False
         self.logger = TrainingLogger()
@@ -187,6 +188,8 @@ class BaseTrainer:
             if self.early_stop_triggered:
                 self.logger.log_early_stop(epoch, self.best_acc, self.best_checkpoint_path)
                 break
+
+            self._current_epoch = epoch
 
             self._pre_epoch_hook(epoch)
             self.logger.log_epoch_start(epoch)
@@ -260,6 +263,10 @@ class BaseTrainer:
         else:
             dicts = {'model': self.model.state_dict()}
         dicts['model_type'] = self._model_type
+        dicts['epoch'] = self._current_epoch + 1
+        dicts['best_acc'] = self.best_acc
+        dicts['best_checkpoint_path'] = self.best_checkpoint_path
+        dicts['patience_counter'] = self.patience_counter
         if save_opt:
             dicts['opt'] = self.optimizer.state_dict()
             dicts['lr_scheduler'] = self.lr_scheduler.state_dict()
@@ -267,8 +274,6 @@ class BaseTrainer:
         if save_config:
             dicts['config'] = {s: config.__getattribute__(s) for s in dir(config) if not s.startswith('_')}
         dicts['train_log'] = self.train_log
-        dicts['best_acc'] = self.best_acc
-        dicts['best_checkpoint_path'] = self.best_checkpoint_path
         t.save(dicts, save_path)
 
     def load_model(self, load_path, skip_load_weights=False, save_opt=False, save_config=False):
@@ -277,24 +282,32 @@ class BaseTrainer:
             self.model.load_state_dict(dicts['model'])
             if self.ema is not None:
                 self.ema.ema.load_state_dict(dicts['model'])
+        if 'epoch' in dicts:
+            config.start_epoch = dicts['epoch']
+            self._current_epoch = dicts['epoch']
+        elif 'train_log' in dicts and len(dicts['train_log']) > 0:
+            config.start_epoch = dicts['train_log'][-1]['epoch']
+            self._current_epoch = dicts['train_log'][-1]['epoch']
+        if 'best_acc' in dicts:
+            self.best_acc = dicts['best_acc']
+        if 'best_checkpoint_path' in dicts:
+            self.best_checkpoint_path = dicts['best_checkpoint_path']
+        if 'patience_counter' in dicts:
+            self.patience_counter = dicts['patience_counter']
+        if 'train_log' in dicts:
+            self.train_log = dicts['train_log']
         if save_opt:
             self.optimizer.load_state_dict(dicts['opt'])
             if 'lr_scheduler' in dicts:
                 self.lr_scheduler.load_state_dict(dicts['lr_scheduler'])
             if 'scaler' in dicts:
                 self.scaler.load_state_dict(dicts['scaler'])
-            if 'train_log' in dicts and len(dicts['train_log']) > 0:
-                config.start_epoch = dicts['train_log'][-1]['epoch']
-            if 'best_acc' in dicts:
-                self.best_acc = dicts['best_acc']
-            if 'best_checkpoint_path' in dicts:
-                self.best_checkpoint_path = dicts['best_checkpoint_path']
-        else:
-            if 'best_acc' in dicts:
-                self.best_acc = dicts['best_acc']
         if save_config:
             for k, v in dicts['config'].items():
                 config.__setattr__(k, v)
+        if not save_opt and config.start_epoch > 0:
+            for _ in range(config.start_epoch):
+                self.lr_scheduler.step()
 
     def _check_early_stopping(self, acc, epoch):
         if acc > self.best_acc:
