@@ -66,6 +66,8 @@ class TrainingLogger:
     def log_epoch_start(self, epoch):
         self.epoch_start_time = time.time()
         self.gpu_peak_mem = 0
+        if t.cuda.is_available():
+            t.cuda.reset_peak_memory_stats()
         self.logger.info(f'--- Epoch {epoch + 1}/{config.epoches} START ---')
 
     def log_batch(self, epoch, batch_idx, total_batches, loss, lr, acc_str,
@@ -86,11 +88,11 @@ class TrainingLogger:
         msg += f' lr={lr:.8f} {acc_str}'
         if t.cuda.is_available():
             alloc = t.cuda.memory_allocated() / (1024**3)
-            reserved = t.cuda.memory_reserved() / (1024**3)
+            peak = t.cuda.max_memory_allocated() / (1024**3)
             gpu_props = t.cuda.get_device_properties(0)
             total = getattr(gpu_props, 'total_mem', getattr(gpu_props, 'total_memory', 0)) / (1024**3)
-            self.gpu_peak_mem = max(self.gpu_peak_mem, alloc)
-            msg += f' gpu_mem={alloc:.1f}/{total:.1f}GB'
+            self.gpu_peak_mem = max(self.gpu_peak_mem, peak)
+            msg += f' gpu_mem={alloc:.1f}/{total:.1f}GB peak={peak:.1f}GB'
         cpu_mem = psutil.virtual_memory()
         msg += f' cpu_mem={cpu_mem.used / (1024**3):.1f}/{cpu_mem.total / (1024**3):.1f}GB'
         if batch_time is not None:
@@ -194,13 +196,22 @@ class BaseTrainer:
                 if 'out of memory' in str(e).lower() and self._oom_retry_count < 3:
                     self._oom_retry_count += 1
                     old_bs = config.batch_size
-                    config.batch_size = max(int(config.batch_size * 0.75), 16)
+                    t.cuda.empty_cache()
+                    peak_gb = t.cuda.max_memory_allocated() / (1024**3)
+                    gpu_props = t.cuda.get_device_properties(0)
+                    total_gb = getattr(gpu_props, 'total_mem', getattr(gpu_props, 'total_memory', 0)) / (1024**3)
+                    if peak_gb > 0 and total_gb > 0:
+                        safe_ratio = (total_gb * 0.85) / peak_gb
+                        config.batch_size = max(int(config.batch_size * safe_ratio), 16)
+                    else:
+                        config.batch_size = max(int(config.batch_size * 0.75), 16)
                     config.grad_accum_steps = max(self._original_batch_size // config.batch_size, 1)
                     self._stable_batch_size = None
                     self.logger.logger.warning(
                         f'[OOM] Reducing batch_size {old_bs} -> {config.batch_size}, '
+                        f'peak={peak_gb:.1f}GB/{total_gb:.1f}GB, '
                         f'grad_accum_steps={config.grad_accum_steps} (retry {self._oom_retry_count})')
-                    t.cuda.empty_cache()
+                    t.cuda.reset_peak_memory_stats()
                     self._rebuild_dataloaders()
                     continue
                 else:
