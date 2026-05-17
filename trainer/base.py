@@ -55,7 +55,8 @@ class TrainingLogger:
         self.logger.info(f'Trainable parameters: {trainable_params:,}')
         if t.cuda.is_available():
             gpu_name = t.cuda.get_device_name(0)
-            gpu_total = t.cuda.get_device_properties(0).total_mem / (1024**3)
+            gpu_props = t.cuda.get_device_properties(0)
+            gpu_total = getattr(gpu_props, 'total_mem', getattr(gpu_props, 'total_memory', 0)) / (1024**3)
             self.logger.info(f'GPU: {gpu_name} ({gpu_total:.1f}GB)')
         self.logger.info(f'Batch size: {config.batch_size}')
         self.logger.info(f'Learning rate: {config.lr}')
@@ -86,7 +87,8 @@ class TrainingLogger:
         if t.cuda.is_available():
             alloc = t.cuda.memory_allocated() / (1024**3)
             reserved = t.cuda.memory_reserved() / (1024**3)
-            total = t.cuda.get_device_properties(0).total_mem / (1024**3)
+            gpu_props = t.cuda.get_device_properties(0)
+            total = getattr(gpu_props, 'total_mem', getattr(gpu_props, 'total_memory', 0)) / (1024**3)
             self.gpu_peak_mem = max(self.gpu_peak_mem, alloc)
             msg += f' gpu_mem={alloc:.1f}/{total:.1f}GB'
         cpu_mem = psutil.virtual_memory()
