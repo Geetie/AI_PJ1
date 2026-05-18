@@ -407,9 +407,20 @@ class BaseTrainer:
         dicts = t.load(load_path, map_location=self.device, weights_only=False)
         raw_model = self._get_raw_model()
         if not skip_load_weights:
-            raw_model.load_state_dict(dicts['model'])
+            incompatible = raw_model.load_state_dict(dicts['model'], strict=False)
+            if incompatible.missing_keys or incompatible.unexpected_keys:
+                self.logger.logger.warning(
+                    f'[LOAD] Incompatible keys detected. '
+                    f'Missing: {len(incompatible.missing_keys)}, '
+                    f'Unexpected: {len(incompatible.unexpected_keys)}')
+                if incompatible.missing_keys:
+                    self.logger.logger.warning(
+                        f'[LOAD] Missing keys (randomly initialized): '
+                        f'{incompatible.missing_keys[:5]}...'
+                        if len(incompatible.missing_keys) > 5
+                        else f'[LOAD] Missing keys: {incompatible.missing_keys}')
             if self.ema is not None:
-                self.ema.ema.load_state_dict(dicts['model'])
+                self.ema.ema.load_state_dict(dicts['model'], strict=False)
         if 'epoch' in dicts:
             config.start_epoch = dicts['epoch']
             self._current_epoch = dicts['epoch']
