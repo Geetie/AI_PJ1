@@ -57,6 +57,8 @@ class MultiHeadTrainer(BaseTrainer):
         else:
             self.val_loader = None
 
+        self._diagnose_dataloader()
+
         self.model = create_model(self._model_type).to(self.device)
 
         backbone_params = list(self.model.backbone.parameters())
@@ -94,18 +96,57 @@ class MultiHeadTrainer(BaseTrainer):
 
         self._gpu_warmup()
 
+    def _diagnose_dataloader(self):
+        print('[DIAG] Testing DataLoader first batch load...')
+        diag_start = time.time()
+        try:
+            sample_batch = next(iter(self.train_loader))
+            diag_time = time.time() - diag_start
+            img_shape = sample_batch[0].shape
+            print(f'[DIAG] First batch loaded in {diag_time:.2f}s, img_shape={img_shape}')
+            if diag_time > 30:
+                print(f'[DIAG] WARNING: Data loading is very slow ({diag_time:.1f}s). '
+                      f'Consider reducing num_workers or checking disk I/O.')
+            del sample_batch
+        except Exception as e:
+            diag_time = time.time() - diag_start
+            print(f'[DIAG] DataLoader test FAILED after {diag_time:.2f}s: {e}')
+            if config.num_workers > 0:
+                print(f'[DIAG] Falling back to num_workers=0 due to DataLoader failure')
+                config.num_workers = 0
+                config.prefetch_factor = None
+                config.persistent_workers = False
+                config.multiprocessing_context = None
+                self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
+                                                      shuffle=True, drop_last=True)
+                if self.val_loader is not None:
+                    self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
+                                                        shuffle=False, drop_last=False)
+
     def _gpu_warmup(self):
         print('[WARMUP] Starting GPU warmup (MIOpen kernel compilation)...')
         warmup_start = time.time()
         try:
-            dummy = t.randn(2, 3, config.input_height, config.input_width, device=self.device)
-            with t.no_grad():
-                _ = self.model(dummy)
+            warmup_bs = min(config.batch_size, 32)
+            dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
+            dummy_label = t.randint(0, config.class_num, (warmup_bs, config.num_heads), device=self.device)
+            dummy_bbox = t.rand(warmup_bs, config.num_heads, 4, device=self.device)
+            dummy_mask = t.ones(warmup_bs, config.num_heads, device=self.device)
+            for i in range(config.num_heads):
+                dummy_mask[:, i] = (t.rand(warmup_bs) > 0.3).float()
+            with autocast(self.device.type, enabled=self.use_amp):
+                pred, pred_bboxes, attn_maps, head_cls_outs = self.model.forward_with_attn(dummy, gt_bboxes=dummy_bbox)
+                cls_loss = sum(self.head_criteria[h](pred[h], dummy_label[:, h]) for h in range(config.num_heads))
+                loss = cls_loss / config.grad_accum_steps
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            self.optimizer.zero_grad()
             t.cuda.synchronize()
-            del dummy
+            del dummy, dummy_label, dummy_bbox, dummy_mask, pred, pred_bboxes, attn_maps, head_cls_outs, loss
             t.cuda.empty_cache()
             warmup_time = time.time() - warmup_start
-            print(f'[WARMUP] GPU warmup completed in {warmup_time:.1f}s')
+            print(f'[WARMUP] GPU warmup completed in {warmup_time:.1f}s (forward+backward with bs={warmup_bs})')
         except Exception as e:
             print(f'[WARMUP] GPU warmup failed: {e}')
             t.cuda.empty_cache()
@@ -180,18 +221,27 @@ class MultiHeadTrainer(BaseTrainer):
         char_corrects = 0
         total_chars = 0
         batch_start = time.time()
-        tbar = tqdm(self.train_loader)
         self.model.train()
         first_batch = True
+        data_load_time = 0.0
+
+        print(f'[EPOCH {epoch+1}] Waiting for first batch from DataLoader...')
+        t_load_start = time.time()
+        tbar = tqdm(self.train_loader)
+        data_load_time = time.time() - t_load_start
+        print(f'[EPOCH {epoch+1}] DataLoader iterator created in {data_load_time:.2f}s')
 
         for i, (img, label, bbox_target, bbox_mask) in enumerate(tbar):
+            t_data = time.time()
+            if first_batch:
+                print(f'[BATCH0] data load time: {t_data - batch_start:.2f}s')
+
             t0 = time.time()
             img = img.to(self.device)
             label = label.to(self.device)
             bbox_target = bbox_target.to(self.device)
             bbox_mask = bbox_mask.to(self.device)
-            if first_batch:
-                print(f'[BATCH0] data->gpu: {time.time()-t0:.2f}s, img={img.shape}')
+            t_gpu = time.time()
 
             t1 = time.time()
 
@@ -216,7 +266,7 @@ class MultiHeadTrainer(BaseTrainer):
                 pred, pred_bboxes, attn_maps, head_cls_outs = self.model.forward_with_attn(img, gt_bboxes=bbox_target)
                 if first_batch:
                     t.cuda.synchronize()
-                    print(f'[BATCH0] forward: {time.time()-t1:.2f}s')
+                    print(f'[BATCH0] forward: {time.time()-t1:.2f}s, gpu_transfer: {t_gpu-t0:.2f}s, img={img.shape}')
 
                 true_lengths = bbox_mask.sum(dim=1).long()
 
@@ -283,7 +333,11 @@ class MultiHeadTrainer(BaseTrainer):
                 self.ema.update(self.model)
             if first_batch:
                 t.cuda.synchronize()
-                print(f'[BATCH0] forward+backward+step: {time.time()-t1:.2f}s, loss={loss.item():.4f}')
+                t_backward = time.time()
+                print(f'[BATCH0] backward+step: {t_backward-t1:.2f}s, loss={loss.item():.4f}')
+                print(f'[BATCH0] TOTAL batch time: {t_backward-batch_start:.2f}s '
+                      f'(data_load={t_data-batch_start:.2f}s gpu_transfer={t_gpu-t0:.2f}s '
+                      f'forward={t1-t_gpu:.2f}s backward={t_backward-t1:.2f}s)')
                 first_batch = False
             total_loss += loss.item()
             batch_time = time.time() - batch_start

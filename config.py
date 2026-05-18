@@ -8,6 +8,9 @@ BASE_DIR = '/mnt/workspace' if os.path.exists('/mnt/workspace') else SCRIPT_DIR
 
 IS_MODELSCOPE = os.path.exists('/mnt/workspace')
 
+os.environ.setdefault('MIOPEN_DISABLE_CACHE', '0')
+os.environ.setdefault('MIOPEN_USER_DB_PATH', os.path.join(BASE_DIR, 'miopen_cache'))
+
 
 def _detect_gpu_platform():
     if not t.cuda.is_available():
@@ -149,10 +152,10 @@ class A100Profile(GPUProfile):
 class AMDLargeProfile(GPUProfile):
     batch_size = 256
     eval_batch_size = 384
-    num_workers = 0
-    prefetch_factor = None
-    persistent_workers = False
-    multiprocessing_context = None
+    num_workers = 8
+    prefetch_factor = 2
+    persistent_workers = True
+    multiprocessing_context = 'fork'
     input_height = 416
     input_width = 416
     resize_size = 448
@@ -163,7 +166,7 @@ class AMDLargeProfile(GPUProfile):
     use_gradient_checkpoint = False
     oom_headroom_ratio = 0.10
     max_checkpoints = 3
-    pin_memory = False
+    pin_memory = True
     tta_sizes = [320, 352, 384, 416, 448]
     lr = 5e-3
     backbone_lr_factor = 0.1
