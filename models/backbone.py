@@ -73,7 +73,7 @@ class FPNBackbone(nn.Module):
             nn.ReLU(inplace=True),
         )
         self.se = SEBlock(config.multiscale_feat_dim)
-        self.use_checkpoint = True
+        self.use_checkpoint = config.use_gradient_checkpoint
 
     def _forward_early(self, x):
         x = self.stem(x)

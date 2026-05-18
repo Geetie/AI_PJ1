@@ -1,4 +1,5 @@
 import os
+import gc
 import json
 import random
 import time
@@ -9,13 +10,31 @@ from torch.amp import autocast
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from config import config, NUM_WORKERS, data_dir
+from config import config, data_dir
 from data.dataset import DigitsDataset
 from models import create_model
 from losses.classification import LabelSmoothEntropy
 from losses.attention import AttentionSupervisionLoss, attention_diversity_loss, spatial_ordering_loss
 from losses.augmentation import cutmix_data
 from trainer.base import BaseTrainer, ModelEMA
+
+
+def _compute_joint_acc(pred_heads, labels, true_lengths, num_heads):
+    head_correct = [(pred_heads[h].argmax(1) == labels[:, h]) for h in range(num_heads)]
+    temp = t.stack(head_correct, dim=1)
+    valid_head_mask = t.stack([(true_lengths > h).float() for h in range(num_heads)], dim=1)
+    correct_mask = (temp | (valid_head_mask == 0))
+    return t.all(correct_mask, dim=1).sum().item()
+
+
+def _compute_char_acc(pred_heads, labels, true_lengths, num_heads):
+    corrects = 0
+    total_chars = true_lengths.sum().item()
+    for h in range(num_heads):
+        valid_mask = (true_lengths > h).float()
+        if valid_mask.sum() > 0:
+            corrects += ((pred_heads[h].argmax(1) == labels[:, h]) * valid_mask).sum().item()
+    return corrects, total_chars
 
 
 class MultiHeadTrainer(BaseTrainer):
@@ -29,25 +48,29 @@ class MultiHeadTrainer(BaseTrainer):
         self.train_set = DigitsDataset(mode='train', aug=True,
                                        input_size=(config.input_height, config.input_width))
         self.train_loader = DataLoader(self.train_set, batch_size=config.batch_size, shuffle=True,
-                                       num_workers=NUM_WORKERS, pin_memory=True,
-                                       persistent_workers=NUM_WORKERS > 0,
+                                       num_workers=config.num_workers, pin_memory=config.pin_memory,
+                                       persistent_workers=config.num_workers > 0,
                                        drop_last=True,
-                                       prefetch_factor=2)
+                                       prefetch_factor=config.prefetch_factor)
         if val:
             self.val_set = DigitsDataset(mode='val', aug=False,
                                          input_size=(config.input_height, config.input_width))
-            self.val_loader = DataLoader(self.val_set, batch_size=config.batch_size,
-                                         num_workers=NUM_WORKERS, pin_memory=True, drop_last=False,
-                                         persistent_workers=NUM_WORKERS > 0,
-                                         prefetch_factor=2)
+            self.val_loader = DataLoader(self.val_set, batch_size=config.eval_batch_size,
+                                         num_workers=config.num_workers, pin_memory=config.pin_memory, drop_last=False,
+                                         persistent_workers=config.num_workers > 0,
+                                         prefetch_factor=config.prefetch_factor)
         else:
             self.val_loader = None
 
         self.model = create_model(self._model_type).to(self.device)
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
         if config.use_torch_compile and t.cuda.is_available():
-            self.model = t.compile(self.model, mode="reduce-overhead")
-            print('✅ torch.compile enabled')
+            try:
+                self.model = t.compile(self.model, mode=config.compile_mode)
+                print(f'torch.compile enabled (mode={config.compile_mode})')
+            except Exception as e:
+                print(f'torch.compile failed: {e}, falling back to eager mode')
+                config.use_torch_compile = False
 
         self.attn_supervision = AttentionSupervisionLoss()
 
@@ -87,7 +110,7 @@ class MultiHeadTrainer(BaseTrainer):
         class_weights = 1.0 / (class_counts + 1e-6)
         class_weights = class_weights * config.class_num / class_weights.sum()
         class_weights = class_weights.to(self.device)
-        print(f'✅ Computed class weights from JSON: {class_weights.cpu().numpy()}')
+        print(f'Computed class weights from JSON: {class_weights.cpu().numpy()}')
         print(f'   Class 10 (empty) weight: {class_weights[10].item():.3f}')
         return class_weights
 
@@ -103,20 +126,32 @@ class MultiHeadTrainer(BaseTrainer):
                     progress = (epoch - config.warmup_epochs) / max(decay_end - config.warmup_epochs, 1)
                     self.model.set_roi_gt_prob(1.0 - progress)
 
+    def _cleanup_dataloader(self, loader):
+        if loader is not None:
+            if hasattr(loader, '_iterator'):
+                try:
+                    del loader._iterator
+                except Exception:
+                    pass
+            gc.collect()
+
     def _rebuild_dataloaders(self):
+        self._cleanup_dataloader(self.train_loader)
+        self._cleanup_dataloader(self.val_loader)
         self.train_loader = DataLoader(self.train_set, batch_size=config.batch_size, shuffle=True,
-                                       num_workers=NUM_WORKERS, pin_memory=True,
-                                       persistent_workers=NUM_WORKERS > 0,
-                                       drop_last=True, prefetch_factor=2)
+                                       num_workers=config.num_workers, pin_memory=config.pin_memory,
+                                       persistent_workers=config.num_workers > 0,
+                                       drop_last=True, prefetch_factor=config.prefetch_factor)
         if self.val_loader is not None:
-            self.val_loader = DataLoader(self.val_set, batch_size=config.batch_size,
-                                         num_workers=NUM_WORKERS, pin_memory=True, drop_last=False,
-                                         persistent_workers=NUM_WORKERS > 0, prefetch_factor=2)
+            self.val_loader = DataLoader(self.val_set, batch_size=config.eval_batch_size,
+                                         num_workers=config.num_workers, pin_memory=config.pin_memory, drop_last=False,
+                                         persistent_workers=config.num_workers > 0, prefetch_factor=config.prefetch_factor)
 
     def _train_epoch(self, epoch):
         total_loss = 0
-        corrects = 0
-        total = 0
+        joint_corrects = 0
+        joint_total = 0
+        char_corrects = 0
         total_chars = 0
         batch_start = time.time()
         tbar = tqdm(self.train_loader)
@@ -215,26 +250,20 @@ class MultiHeadTrainer(BaseTrainer):
             batch_time = time.time() - batch_start
             batch_start = time.time()
 
-            total += img.size(0)
-            total_chars += true_lengths.sum().item()
-            if config.use_char_level_acc:
-                for h in range(config.num_heads):
-                    valid_mask = (true_lengths > h).float()
-                    if valid_mask.sum() > 0:
-                        corrects += ((pred[h].argmax(1) == label[:, h]) * valid_mask).sum().item()
-                tbar.set_description(
-                    'Epoch %d, loss: %.3f, char_acc: %.3f' % (epoch + 1, total_loss / (i + 1), corrects * 100 / max(total_chars, 1)))
-            else:
-                head_correct = [(pred[h].argmax(1) == label[:, h]) for h in range(config.num_heads)]
-                temp = t.stack(head_correct, dim=1)
-                valid_head_mask = t.stack([(true_lengths > h).float() for h in range(config.num_heads)], dim=1)
-                # For each sample, all valid heads must be correct
-                correct_mask = (temp | (valid_head_mask == 0))
-                corrects += t.all(correct_mask, dim=1).sum().item()
-                tbar.set_description(
-                    'Epoch %d, loss: %.3f, joint_acc: %.3f' % (epoch + 1, total_loss / (i + 1), corrects * 100 / max(total, 1)))
+            joint_total += img.size(0)
+            joint_corrects += _compute_joint_acc(pred, label, true_lengths, config.num_heads)
+            c_corrects, c_total = _compute_char_acc(pred, label, true_lengths, config.num_heads)
+            char_corrects += c_corrects
+            total_chars += c_total
+
+            tbar.set_description(
+                'Epoch %d, loss: %.3f, joint: %.3f, char: %.3f' % (
+                    epoch + 1, total_loss / (i + 1),
+                    joint_corrects * 100 / max(joint_total, 1),
+                    char_corrects * 100 / max(total_chars, 1)))
+
             if (i + 1) % config.print_interval == 0:
-                acc_str = f'char_acc={corrects * 100 / max(total_chars, 1):.2f}%' if config.use_char_level_acc else f'joint_acc={corrects * 100 / max(total, 1):.2f}%'
+                acc_str = f'joint={joint_corrects * 100 / max(joint_total, 1):.2f}% char={char_corrects * 100 / max(total_chars, 1):.2f}%'
                 self.logger.log_batch(epoch, i, len(self.train_loader),
                                       total_loss / (i + 1), self.optimizer.param_groups[0]['lr'],
                                       acc_str,
@@ -244,10 +273,9 @@ class MultiHeadTrainer(BaseTrainer):
                                       attn_loss=attn_sup_loss.item() if isinstance(attn_sup_loss, t.Tensor) else attn_sup_loss,
                                       batch_time=batch_time)
 
-        if config.use_char_level_acc:
-            return corrects * 100 / max(total_chars, 1)
-        else:
-            return corrects * 100 / max(total, 1)
+        self._last_train_joint_acc = joint_corrects * 100 / max(joint_total, 1)
+        self._last_train_char_acc = char_corrects * 100 / max(total_chars, 1)
+        return self._last_train_joint_acc
 
     def _eval(self):
         if self.ema is not None:
@@ -255,49 +283,64 @@ class MultiHeadTrainer(BaseTrainer):
         else:
             model = self.model
         model.eval()
-        char_corrects = 0
-        total_chars = 0
-        joint_corrects = 0
-        joint_total = 0
-        with t.no_grad():
-            tbar = tqdm(self.val_loader)
-            for i, (img, label, bbox_target, bbox_mask) in enumerate(tbar):
-                img = img.to(self.device)
-                label = label.to(self.device)
-                bbox_mask = bbox_mask.to(self.device)
-                pred_cls, _ = model(img)
+        eval_bs = config.eval_batch_size
+        max_retries = 3
+        for attempt in range(max_retries):
+            char_corrects = 0
+            total_chars = 0
+            joint_corrects = 0
+            joint_total = 0
+            oom_hit = False
+            with t.no_grad():
+                tbar = tqdm(self.val_loader)
+                for i, (img, label, bbox_target, bbox_mask) in enumerate(tbar):
+                    try:
+                        img = img.to(self.device)
+                        label = label.to(self.device)
+                        bbox_mask = bbox_mask.to(self.device)
+                        pred_cls, _ = model(img)
 
-                true_lengths = bbox_mask.sum(dim=1).long()
-                for h in range(config.num_heads):
-                    valid_mask = (true_lengths > h).float()
-                    if valid_mask.sum() > 0:
-                        char_corrects += ((pred_cls[h].argmax(1) == label[:, h]) * valid_mask).sum().item()
-                total_chars += true_lengths.sum().item()
+                        true_lengths = bbox_mask.sum(dim=1).long()
+                        c_corrects, c_total = _compute_char_acc(pred_cls, label, true_lengths, config.num_heads)
+                        char_corrects += c_corrects
+                        total_chars += c_total
 
-                head_correct = [(pred_cls[h].argmax(1) == label[:, h]) for h in range(config.num_heads)]
-                temp = t.stack(head_correct, dim=1)
-                valid_head_mask = t.stack([(true_lengths > h).float() for h in range(config.num_heads)], dim=1)
-                # For each sample, all valid heads must be correct
-                correct_mask = (temp | (valid_head_mask == 0))
-                joint_corrects += t.all(correct_mask, dim=1).sum().item()
-                joint_total += img.size(0)
+                        joint_corrects += _compute_joint_acc(pred_cls, label, true_lengths, config.num_heads)
+                        joint_total += img.size(0)
 
-                tbar.set_description('Val Char: %.2f%% Joint: %.2f%%' % (
-                    char_corrects * 100 / max(total_chars, 1),
-                    joint_corrects * 100 / max(joint_total, 1)))
+                        tbar.set_description('Val Char: %.2f%% Joint: %.2f%%' % (
+                            char_corrects * 100 / max(total_chars, 1),
+                            joint_corrects * 100 / max(joint_total, 1)))
 
-                del img, label, pred_cls
+                        del img, label, pred_cls
+                    except RuntimeError as e:
+                        if 'out of memory' in str(e).lower():
+                            t.cuda.empty_cache()
+                            oom_hit = True
+                            if eval_bs > 16:
+                                eval_bs = max(eval_bs // 2, 16)
+                                self.logger.logger.warning(
+                                    f'[OOM-EVAL] Reducing eval_batch_size to {eval_bs} (attempt {attempt + 1})')
+                                self.val_loader = DataLoader(
+                                    self.val_set, batch_size=eval_bs,
+                                    num_workers=config.num_workers, pin_memory=config.pin_memory,
+                                    drop_last=False, persistent_workers=config.num_workers > 0,
+                                    prefetch_factor=config.prefetch_factor)
+                            break
+                        raise
+            if oom_hit:
+                continue
+            break
         t.cuda.empty_cache()
         self.model.train()
 
         char_acc = char_corrects / max(total_chars, 1)
         joint_acc = joint_corrects / max(joint_total, 1)
+        self._last_val_char_acc = char_acc
+        self._last_val_joint_acc = joint_acc
         print(f'  Char Acc: {char_acc * 100:.2f}%  |  Joint Acc: {joint_acc * 100:.2f}%')
 
-        if config.use_char_level_acc:
-            return char_acc
-        else:
-            return joint_acc
+        return joint_acc
 
     def eval_detailed(self):
         if self.ema is not None:
@@ -325,18 +368,11 @@ class MultiHeadTrainer(BaseTrainer):
                     head_corrects[h] += ((pred_cls[h].argmax(1) == label[:, h]) * valid_mask).sum().item()
                     head_totals[h] += valid_mask.sum().item()
 
-                for h in range(config.num_heads):
-                    valid_mask = (true_lengths > h).float()
-                    if valid_mask.sum() > 0:
-                        char_corrects += ((pred_cls[h].argmax(1) == label[:, h]) * valid_mask).sum().item()
-                total_chars += true_lengths.sum().item()
+                c_corrects, c_total = _compute_char_acc(pred_cls, label, true_lengths, config.num_heads)
+                char_corrects += c_corrects
+                total_chars += c_total
 
-                head_correct = [(pred_cls[h].argmax(1) == label[:, h]) for h in range(config.num_heads)]
-                temp = t.stack(head_correct, dim=1)
-                valid_head_mask = t.stack([(true_lengths > h).float() for h in range(config.num_heads)], dim=1)
-                # For each sample, all valid heads must be correct
-                correct_mask = (temp | (valid_head_mask == 0))
-                joint_corrects += t.all(correct_mask, dim=1).sum().item()
+                joint_corrects += _compute_joint_acc(pred_cls, label, true_lengths, config.num_heads)
                 joint_total += img.size(0)
 
                 del img, label, pred_cls
@@ -352,10 +388,7 @@ class MultiHeadTrainer(BaseTrainer):
         t.cuda.empty_cache()
         self.model.train()
 
-        if config.use_char_level_acc:
-            return char_acc
-        else:
-            return joint_acc
+        return joint_acc
 
     def eval_tta(self):
         if self.ema is not None:
@@ -366,16 +399,17 @@ class MultiHeadTrainer(BaseTrainer):
 
         all_probs = [t.zeros(len(self.val_set), config.class_num, device='cpu') for _ in range(config.num_heads)]
         all_labels = t.zeros(len(self.val_set), config.num_heads, dtype=t.long, device='cpu')
+        all_bbox_mask = t.zeros(len(self.val_set), config.num_heads, dtype=t.float, device='cpu')
 
         for tta_size in config.tta_sizes:
             val_set_tta = DigitsDataset(mode='val', aug=False,
                                         input_size=(tta_size, tta_size))
-            val_loader_tta = DataLoader(val_set_tta, batch_size=config.batch_size,
-                                        num_workers=NUM_WORKERS, pin_memory=True, drop_last=False,
+            val_loader_tta = DataLoader(val_set_tta, batch_size=config.eval_batch_size,
+                                        num_workers=config.num_workers, pin_memory=config.pin_memory, drop_last=False,
                                         persistent_workers=False)
             sample_idx = 0
             with t.no_grad():
-                for img, label, _, _ in tqdm(val_loader_tta, desc=f'TTA size={tta_size}'):
+                for img, label, _, bbox_mask in tqdm(val_loader_tta, desc=f'TTA size={tta_size}'):
                     img = img.to(self.device)
                     probs = model.forward_with_probs(img)
                     bs = img.size(0)
@@ -383,19 +417,20 @@ class MultiHeadTrainer(BaseTrainer):
                         all_probs[h][sample_idx:sample_idx + bs] += probs[h].cpu()
                     if tta_size == config.tta_sizes[0]:
                         all_labels[sample_idx:sample_idx + bs] = label.cpu()
+                        all_bbox_mask[sample_idx:sample_idx + bs] = bbox_mask.cpu()
                     sample_idx += bs
                     del img, probs
                 t.cuda.empty_cache()
 
-        pred_heads = t.stack([all_probs[h].argmax(1) for h in range(config.num_heads)], dim=1)
-        if config.use_char_level_acc:
-            valid_mask = (all_labels < config.class_num - 1)
-            corrects = (pred_heads == all_labels).float() * valid_mask.float()
-            total_chars = valid_mask.sum().item()
-            acc = corrects.sum().item() / max(total_chars, 1)
-        else:
-            corrects = t.all(pred_heads == all_labels, dim=1).sum().item()
-            acc = corrects / len(self.val_set)
-        print(f'TTA Val Acc: {acc * 100:.2f}')
+        pred_heads = [all_probs[h].argmax(1) for h in range(config.num_heads)]
+        true_lengths = all_bbox_mask.sum(dim=1).long()
+
+        char_corrects, total_chars = _compute_char_acc(pred_heads, all_labels, true_lengths, config.num_heads)
+        char_acc = char_corrects / max(total_chars, 1)
+
+        joint_corrects = _compute_joint_acc(pred_heads, all_labels, true_lengths, config.num_heads)
+        joint_acc = joint_corrects / len(self.val_set)
+
+        print(f'TTA Char Acc: {char_acc * 100:.2f}%  |  Joint Acc: {joint_acc * 100:.2f}%')
         self.model.train()
-        return acc
+        return joint_acc

@@ -14,8 +14,11 @@ set_seed(42)
 
 import torch as t
 if t.cuda.is_available():
-    t.set_float32_matmul_precision('high')
-    print('TF32 matmul precision enabled')
+    try:
+        t.set_float32_matmul_precision('high')
+        print('TF32 matmul precision enabled')
+    except Exception:
+        print('TF32 matmul precision not supported on this GPU')
 
 
 if __name__ == '__main__':

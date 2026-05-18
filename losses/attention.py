@@ -48,7 +48,7 @@ class AttentionSupervisionLoss(nn.Module):
 
 def attention_diversity_loss(attn_maps):
     if attn_maps is None or len(attn_maps) < 2:
-        return t.tensor(0.0, device=t.device('cuda' if t.cuda.is_available() else 'cpu'), requires_grad=True)
+        return t.tensor(0.0, device=attn_maps[0].device if attn_maps is not None and len(attn_maps) > 0 else t.device('cpu'), requires_grad=True)
     n = len(attn_maps)
     loss = 0.0
     for i in range(n):
@@ -61,7 +61,7 @@ def attention_diversity_loss(attn_maps):
 
 def spatial_ordering_loss(attn_maps, bbox_preds=None, bbox_mask=None):
     if attn_maps is None or len(attn_maps) < 2:
-        return t.tensor(0.0, device=t.device('cuda' if t.cuda.is_available() else 'cpu'), requires_grad=True)
+        return t.tensor(0.0, device=attn_maps[0].device if attn_maps is not None and len(attn_maps) > 0 else t.device('cpu'), requires_grad=True)
 
     loss = t.tensor(0.0, device=attn_maps[0].device)
 

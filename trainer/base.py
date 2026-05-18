@@ -1,9 +1,11 @@
 import os
+import gc
 import copy
 import time
 import logging
 import psutil
 import signal
+import glob as glob_mod
 import torch as t
 from tqdm.auto import tqdm
 from torch.optim import SGD
@@ -60,12 +62,15 @@ class TrainingLogger:
         if t.cuda.is_available():
             gpu_name = t.cuda.get_device_name(0)
             self.logger.info(f'GPU: {gpu_name}')
-        self.logger.info(f'Batch size: {config.batch_size}')
+        self.logger.info(f'Train batch size: {config.batch_size}')
+        self.logger.info(f'Eval batch size: {config.eval_batch_size}')
         self.logger.info(f'Gradient Accumulation Steps: {config.grad_accum_steps}')
         self.logger.info(f'Equivalent Batch Size: {config.batch_size * config.grad_accum_steps}')
         self.logger.info(f'Learning rate: {config.lr}')
         self.logger.info(f'Epochs: {config.epoches}')
         self.logger.info(f'Use Torch Compile: {config.use_torch_compile}')
+        if config.use_torch_compile:
+            self.logger.info(f'Compile Mode: {config.compile_mode}')
         self.logger.info(f'Log file: {self.log_path}')
 
     def log_epoch_start(self, epoch):
@@ -104,12 +109,15 @@ class TrainingLogger:
             msg += f' batch_time={batch_time:.2f}s'
         self.logger.info(msg)
 
-    def log_epoch_end(self, epoch, train_acc, val_acc, lr, is_best=False, patience_counter=0):
+    def log_epoch_end(self, epoch, train_acc, val_acc, lr, is_best=False, patience_counter=0,
+                      char_acc=None):
         epoch_time = time.time() - self.epoch_start_time
         mins, secs = divmod(int(epoch_time), 60)
         msg = f'[EPOCH] Epoch={epoch + 1}/{config.epoches} ' \
-              f'train_acc={train_acc:.2f}% val_acc={val_acc:.2f}% ' \
-              f'lr={lr:.8f} epoch_time={mins}m{secs:02d}s'
+              f'train_acc={train_acc:.2f}% val_joint={val_acc:.2f}%'
+        if char_acc is not None:
+            msg += f' val_char={char_acc:.2f}%'
+        msg += f' lr={lr:.8f} epoch_time={mins}m{secs:02d}s'
         if t.cuda.is_available():
             msg += f' gpu_peak={self.gpu_peak_mem:.1f}GB'
         msg += f' best={is_best} patience={patience_counter}/{config.early_stopping_patience}'
@@ -122,8 +130,8 @@ class TrainingLogger:
         self.logger.info(f'[STOP] Early stopping at epoch {epoch + 1}, '
                          f'best_acc={best_acc * 100:.2f}%, best_path={best_path}')
 
-    def log_save(self, path):
-        self.logger.info(f'[SAVE] Model saved to {path}')
+    def log_save(self, path, save_type='full'):
+        self.logger.info(f'[SAVE] Model saved to {path} (type={save_type})')
 
 
 class ModelEMA:
@@ -150,7 +158,6 @@ class ModelEMA:
         return self.ema
 
     def __getattr__(self, name):
-        # 优先访问 ModelEMA 自身的属性
         if name in self.__dict__:
             return self.__dict__[name]
         return getattr(self.ema, name)
@@ -176,7 +183,8 @@ class BaseTrainer:
         self._stable_epoch_count = 0
         self._min_stable_epochs_for_recovery = 3
         self._pending_save = False
-        
+        self._periodic_checkpoints = []
+
         if hasattr(signal, 'SIGUSR1'):
             signal.signal(signal.SIGUSR1, self._handle_save_signal)
 
@@ -214,6 +222,32 @@ class BaseTrainer:
     def _eval(self):
         raise NotImplementedError
 
+    def _cleanup_old_checkpoints(self):
+        if len(self._periodic_checkpoints) <= config.max_checkpoints:
+            return
+        to_remove = self._periodic_checkpoints[:-config.max_checkpoints]
+        for path in to_remove:
+            if os.path.exists(path) and path != self.best_checkpoint_path:
+                try:
+                    os.remove(path)
+                    self.logger.logger.info(f'[CLEANUP] Removed old checkpoint: {path}')
+                except OSError as e:
+                    self.logger.logger.warning(f'[CLEANUP] Failed to remove {path}: {e}')
+        self._periodic_checkpoints = self._periodic_checkpoints[-config.max_checkpoints:]
+
+    def _cleanup_dataloader(self, loader):
+        if loader is not None:
+            if hasattr(loader, '_iterator'):
+                try:
+                    del loader._iterator
+                except Exception:
+                    pass
+            try:
+                loader._IterableDataset_len_called = None
+            except Exception:
+                pass
+            gc.collect()
+
     def train(self):
         for epoch in range(config.start_epoch, config.epoches):
             if self.early_stop_triggered:
@@ -234,8 +268,9 @@ class BaseTrainer:
                     peak_gb = t.cuda.max_memory_allocated() / (1024**3)
                     gpu_props = t.cuda.get_device_properties(0)
                     total_gb = getattr(gpu_props, 'total_mem', getattr(gpu_props, 'total_memory', 0)) / (1024**3)
+                    headroom = total_gb * config.oom_headroom_ratio
                     if peak_gb > 0 and total_gb > 0:
-                        safe_ratio = (total_gb * 0.85) / peak_gb
+                        safe_ratio = (total_gb - headroom) / peak_gb
                         config.batch_size = max(int(config.batch_size * safe_ratio), 16)
                     else:
                         config.batch_size = max(int(config.batch_size * 0.75), 16)
@@ -244,8 +279,10 @@ class BaseTrainer:
                     self.logger.logger.warning(
                         f'[OOM] Reducing batch_size {old_bs} -> {config.batch_size}, '
                         f'peak={peak_gb:.1f}GB/{total_gb:.1f}GB, '
+                        f'headroom={headroom:.1f}GB, '
                         f'grad_accum_steps={config.grad_accum_steps} (retry {self._oom_retry_count})')
                     t.cuda.reset_peak_memory_stats()
+                    self._cleanup_dataloader(self.train_loader)
                     self._rebuild_dataloaders()
                     continue
                 else:
@@ -258,14 +295,28 @@ class BaseTrainer:
                 self.logger.logger.info(f'[STABLE] batch_size={config.batch_size} confirmed stable')
             if config.batch_size < self._stable_batch_size:
                 if self._stable_epoch_count >= self._min_stable_epochs_for_recovery:
-                    new_bs = min(config.batch_size + 8, self._stable_batch_size)
+                    if t.cuda.is_available():
+                        current_usage = t.cuda.max_memory_allocated() / (1024**3)
+                        gpu_props = t.cuda.get_device_properties(0)
+                        total_gb = getattr(gpu_props, 'total_mem', getattr(gpu_props, 'total_memory', 0)) / (1024**3)
+                        headroom = total_gb * config.oom_headroom_ratio
+                        usage_ratio = current_usage / (total_gb - headroom) if (total_gb - headroom) > 0 else 1.0
+                    else:
+                        usage_ratio = 0.5
+                    if usage_ratio < 0.7:
+                        recovery_step = max(16, int(self._stable_batch_size * 0.1))
+                    else:
+                        recovery_step = 8
+                    new_bs = min(config.batch_size + recovery_step, self._stable_batch_size)
                     if new_bs != config.batch_size:
                         config.batch_size = new_bs
                         config.grad_accum_steps = max(self._original_batch_size // config.batch_size, 1)
                         self._stable_epoch_count = 0
                         self.logger.logger.info(
-                            f'[RECOVER] Increasing batch_size to {config.batch_size}, '
+                            f'[RECOVER] Increasing batch_size to {config.batch_size} '
+                            f'(usage_ratio={usage_ratio:.2f}, step={recovery_step}), '
                             f'grad_accum_steps={config.grad_accum_steps}')
+                        self._cleanup_dataloader(self.train_loader)
                         self._rebuild_dataloaders()
                 else:
                     self.logger.logger.info(
@@ -276,27 +327,53 @@ class BaseTrainer:
 
             if (epoch + 1) % config.eval_interval == 0 or self._pending_save:
                 acc = 0.0
+                char_acc_val = None
                 if self.val_loader is not None:
                     acc = self._eval()
+                    if hasattr(self, '_last_val_char_acc'):
+                        char_acc_val = self._last_val_char_acc
                 is_best = acc > self.best_acc
+                train_joint = train_acc
+                train_char = getattr(self, '_last_train_char_acc', None)
                 self.train_log.append({
                     'epoch': epoch + 1,
-                    'train_acc': train_acc,
-                    'val_acc': acc * 100,
+                    'train_joint_acc': train_joint,
+                    'train_char_acc': train_char,
+                    'val_joint_acc': acc * 100,
+                    'val_char_acc': char_acc_val * 100 if char_acc_val is not None else None,
                     'lr': current_lr
                 })
                 self._check_early_stopping(acc, epoch)
-                self.logger.log_epoch_end(epoch, train_acc, acc * 100, current_lr, is_best, self.patience_counter)
+                self.logger.log_epoch_end(epoch, train_acc, acc * 100, current_lr, is_best,
+                                          self.patience_counter, char_acc=char_acc_val * 100 if char_acc_val is not None else None)
                 os.makedirs(config.checkpoints, exist_ok=True)
-                save_path = os.path.join(config.checkpoints,
-                                         'epoch-%s-%d-acc-%.2f.pth' % (self._checkpoint_prefix, epoch + 1, acc * 100))
-                self.save_model(save_path, save_opt=True)
-                self.logger.log_save(save_path)
-                
+
                 if is_best:
+                    best_path = os.path.join(config.checkpoints,
+                                             'best-%s-acc-%.2f.pth' % (self._checkpoint_prefix, acc * 100))
+                    self.save_model(best_path, save_opt=True)
+                    self.logger.log_save(best_path, save_type='best')
+                    if self.best_checkpoint_path and os.path.exists(self.best_checkpoint_path):
+                        old_best = self.best_checkpoint_path
+                        if old_best != best_path and old_best in self._periodic_checkpoints:
+                            pass
+                        elif old_best != best_path:
+                            try:
+                                os.remove(old_best)
+                                self.logger.logger.info(f'[CLEANUP] Removed old best: {old_best}')
+                            except OSError:
+                                pass
                     self.best_acc = acc
-                    self.best_checkpoint_path = save_path
-                
+                    self.best_checkpoint_path = best_path
+
+                if (epoch + 1) % config.checkpoint_interval == 0 or self._pending_save:
+                    periodic_path = os.path.join(config.checkpoints,
+                                                 'epoch-%s-%d-acc-%.2f.pth' % (self._checkpoint_prefix, epoch + 1, acc * 100))
+                    self.save_model(periodic_path, save_opt=False)
+                    self.logger.log_save(periodic_path, save_type='periodic')
+                    self._periodic_checkpoints.append(periodic_path)
+                    self._cleanup_old_checkpoints()
+
                 if self._pending_save:
                     print(f"[EMERGENCY] Emergency save completed for epoch {epoch + 1}")
                     self._pending_save = False

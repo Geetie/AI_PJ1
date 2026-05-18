@@ -1,3 +1,4 @@
+import gc
 import time
 import torch as t
 import torch.nn as nn
@@ -5,7 +6,7 @@ from torch.amp import autocast
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from config import config, NUM_WORKERS
+from config import config
 from data.dataset import CTCDataset, ctc_collate_fn, ctc_test_collate_fn
 from models.ctc import CTCModel
 from trainer.base import BaseTrainer, ModelEMA
@@ -23,17 +24,17 @@ class CTCTrainer(BaseTrainer):
         self.train_set = CTCDataset(mode='train', aug=True,
                                     input_size=(config.input_height, config.input_width))
         self.train_loader = DataLoader(self.train_set, batch_size=config.batch_size, shuffle=True,
-                                       num_workers=NUM_WORKERS, pin_memory=True,
-                                       persistent_workers=NUM_WORKERS > 0,
-                                       drop_last=True, prefetch_factor=2,
+                                       num_workers=config.num_workers, pin_memory=config.pin_memory,
+                                       persistent_workers=config.num_workers > 0,
+                                       drop_last=True, prefetch_factor=config.prefetch_factor,
                                        collate_fn=ctc_collate_fn)
         if val:
             self.val_set = CTCDataset(mode='val', aug=False,
                                       input_size=(config.input_height, config.input_width))
-            self.val_loader = DataLoader(self.val_set, batch_size=config.batch_size,
-                                         num_workers=NUM_WORKERS, pin_memory=True, drop_last=False,
-                                         persistent_workers=NUM_WORKERS > 0,
-                                         prefetch_factor=2, collate_fn=ctc_collate_fn)
+            self.val_loader = DataLoader(self.val_set, batch_size=config.eval_batch_size,
+                                         num_workers=config.num_workers, pin_memory=config.pin_memory, drop_last=False,
+                                         persistent_workers=config.num_workers > 0,
+                                         prefetch_factor=config.prefetch_factor, collate_fn=ctc_collate_fn)
         else:
             self.val_loader = None
 
@@ -53,16 +54,27 @@ class CTCTrainer(BaseTrainer):
         if config.pretrained is not None:
             self.load_model(config.pretrained, save_opt=False)
 
+    def _cleanup_dataloader(self, loader):
+        if loader is not None:
+            if hasattr(loader, '_iterator'):
+                try:
+                    del loader._iterator
+                except Exception:
+                    pass
+            gc.collect()
+
     def _rebuild_dataloaders(self):
+        self._cleanup_dataloader(self.train_loader)
+        self._cleanup_dataloader(self.val_loader)
         self.train_loader = DataLoader(self.train_set, batch_size=config.batch_size, shuffle=True,
-                                       num_workers=NUM_WORKERS, pin_memory=True,
-                                       persistent_workers=NUM_WORKERS > 0,
-                                       drop_last=True, prefetch_factor=2,
+                                       num_workers=config.num_workers, pin_memory=config.pin_memory,
+                                       persistent_workers=config.num_workers > 0,
+                                       drop_last=True, prefetch_factor=config.prefetch_factor,
                                        collate_fn=ctc_collate_fn)
         if self.val_loader is not None:
-            self.val_loader = DataLoader(self.val_set, batch_size=config.batch_size,
-                                         num_workers=NUM_WORKERS, pin_memory=True, drop_last=False,
-                                         persistent_workers=NUM_WORKERS > 0, prefetch_factor=2,
+            self.val_loader = DataLoader(self.val_set, batch_size=config.eval_batch_size,
+                                         num_workers=config.num_workers, pin_memory=config.pin_memory, drop_last=False,
+                                         persistent_workers=config.num_workers > 0, prefetch_factor=config.prefetch_factor,
                                          collate_fn=ctc_collate_fn)
 
     def _train_epoch(self, epoch):
@@ -119,23 +131,46 @@ class CTCTrainer(BaseTrainer):
     def _eval(self):
         model = self.ema.ema if self.ema is not None else self.model
         model.eval()
-        corrects = 0
-        total = 0
-        with t.no_grad():
-            tbar = tqdm(self.val_loader)
-            for img, label_concat, lengths in tbar:
-                img = img.to(self.device)
-                log_probs = model(img)
-                pred_strs = ctc_beam_decode(log_probs.cpu())
-                offset = 0
-                for b in range(len(lengths)):
-                    gt = label_concat[offset:offset + lengths[b]].tolist()
-                    offset += lengths[b]
-                    if pred_strs[b] == gt:
-                        corrects += 1
-                    total += 1
-                tbar.set_description('CTC Val Acc: %.2f' % (corrects * 100 / max(total, 1)))
-                del img, log_probs
+        eval_bs = config.eval_batch_size
+        max_retries = 3
+        for attempt in range(max_retries):
+            corrects = 0
+            total = 0
+            oom_hit = False
+            with t.no_grad():
+                tbar = tqdm(self.val_loader)
+                for img, label_concat, lengths in tbar:
+                    try:
+                        img = img.to(self.device)
+                        log_probs = model(img)
+                        pred_strs = ctc_beam_decode(log_probs.cpu())
+                        offset = 0
+                        for b in range(len(lengths)):
+                            gt = label_concat[offset:offset + lengths[b]].tolist()
+                            offset += lengths[b]
+                            if pred_strs[b] == gt:
+                                corrects += 1
+                            total += 1
+                        tbar.set_description('CTC Val Acc: %.2f' % (corrects * 100 / max(total, 1)))
+                        del img, log_probs
+                    except RuntimeError as e:
+                        if 'out of memory' in str(e).lower():
+                            t.cuda.empty_cache()
+                            oom_hit = True
+                            if eval_bs > 16:
+                                eval_bs = max(eval_bs // 2, 16)
+                                self.logger.logger.warning(
+                                    f'[OOM-EVAL] Reducing eval_batch_size to {eval_bs} (attempt {attempt + 1})')
+                                self.val_loader = DataLoader(
+                                    self.val_set, batch_size=eval_bs,
+                                    num_workers=config.num_workers, pin_memory=config.pin_memory,
+                                    drop_last=False, persistent_workers=config.num_workers > 0,
+                                    prefetch_factor=config.prefetch_factor, collate_fn=ctc_collate_fn)
+                            break
+                        raise
+            if oom_hit:
+                continue
+            break
         t.cuda.empty_cache()
         self.model.train()
         return corrects / max(total, 1)

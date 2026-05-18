@@ -36,10 +36,7 @@ def apply_augmentation(img):
     if config.aug_blur_prob > 0 and random.random() < config.aug_blur_prob:
         img = transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0))(img)
     if random.random() < 0.3:
-        try:
-            img = transforms.RandomPerspective(distortion_scale=0.3, fill=127)(img)
-        except RuntimeError:
-            pass
+        img = transforms.RandomPerspective(distortion_scale=0.3, fill=127)(img)
     if random.random() < 0.2:
         img = transforms.RandomAdjustSharpness(sharpness_factor=2, p=0.5)(img)
     if random.random() < 0.15:

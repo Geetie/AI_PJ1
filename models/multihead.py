@@ -188,8 +188,12 @@ class DigitsResnet101(nn.Module):
         y2 = y2.clamp(min=0, max=H-1)
         batch_idx = t.arange(B, device=feat.device).float()
         boxes = t.stack([batch_idx, x1, y1, x2, y2], dim=1)
-        roi_feat = roi_align(feat, boxes, output_size=7, spatial_scale=1.0)
-        if self.training:
+        try:
+            roi_feat = roi_align(feat, boxes, output_size=7, spatial_scale=1.0)
+        except RuntimeError:
+            self.has_roi = False
+            return t.zeros(B, config.class_num, device=feat.device)
+        if self.training and config.use_gradient_checkpoint:
             roi_processed = t.utils.checkpoint.checkpoint(self.roi_cnn[head_idx], roi_feat, use_reentrant=False)
         else:
             roi_processed = self.roi_cnn[head_idx](roi_feat)
@@ -216,7 +220,7 @@ class DigitsResnet101(nn.Module):
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         results = []
         for head in self.heads:
-            if self.training:
+            if self.training and config.use_gradient_checkpoint:
                 results.append(t.utils.checkpoint.checkpoint(head, feat, False, use_reentrant=False))
             else:
                 results.append(head(feat))
@@ -233,7 +237,7 @@ class DigitsResnet101(nn.Module):
         head_cls_outs, bbox_outs, attn_maps = [], [], []
         head_feats = []
         for head in self.heads:
-            if self.training:
+            if self.training and config.use_gradient_checkpoint:
                 cls_out, bbox_out, hidden, attn = t.utils.checkpoint.checkpoint(
                     head, feat, True, use_reentrant=False)
             else:

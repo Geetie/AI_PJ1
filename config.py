@@ -10,10 +10,8 @@ IS_MODELSCOPE = os.path.exists('/mnt/workspace')
 
 
 def _detect_gpu_platform():
-    """Detect GPU platform: NVIDIA CUDA or AMD ROCm"""
     if not t.cuda.is_available():
         return 'cpu'
-    
     try:
         props = t.cuda.get_device_properties(0)
         gpu_name = props.name.lower()
@@ -26,7 +24,6 @@ def _detect_gpu_platform():
 
 
 def _get_total_vram_gb():
-    """Get total VRAM in GB"""
     if not t.cuda.is_available():
         return 0
     try:
@@ -41,61 +38,212 @@ TOTAL_VRAM_GB = _get_total_vram_gb()
 NUM_PHYSICAL_CORES = multiprocessing.cpu_count() or 2
 
 
-def _auto_batch_size():
-    """Automatically determine batch size based on GPU platform and VRAM"""
-    if not t.cuda.is_available():
-        return 32
-    
+class GPUProfile:
+    batch_size = 32
+    eval_batch_size = 64
+    num_workers = 4
+    prefetch_factor = 2
+    input_height = 384
+    input_width = 384
+    resize_size = 416
+    fc_hidden = 1024
+    grad_accum_steps = 1
+    use_torch_compile = False
+    compile_mode = 'default'
+    use_gradient_checkpoint = True
+    oom_headroom_ratio = 0.15
+    max_checkpoints = 3
+    pin_memory = True
+    tta_sizes = [288, 320, 352, 384, 416]
+    lr = 3e-3
+    backbone_lr_factor = 0.1
+    warmup_epochs = 5
+    dropout = 0.2
+    ema_decay = 0.999
+    aux_loss_weight = 0.3
+    bbox_loss_weight = 5.0
+    attn_diversity_weight = 0.1
+    attn_supervision_weight = 2.0
+    ordering_loss_weight = 2.0
+    multiscale_feat_dim = 512
+    pos_embed_channels = 64
+    feat_spatial_size = 40
+    roi_feat_dim = 256
+    transformer_heads = 4
+    transformer_layers = 4
+    head_interaction_layers = 2
+    num_attn_channels = 8
+    cutmix_alpha = 1.0
+    cutmix_prob = 0.5
+    erase_prob = 0.2
+    smooth = 0.1
+    aug_rotation_degrees = 10
+    aug_blur_prob = 0.15
+    roi_gt_prob = 0.8
+
+
+class CPUProfile(GPUProfile):
+    batch_size = 32
+    eval_batch_size = 32
+    num_workers = 0
+    prefetch_factor = 2
+    input_height = 224
+    input_width = 224
+    resize_size = 256
+    fc_hidden = 512
+    grad_accum_steps = 4
+    use_torch_compile = False
+    pin_memory = False
+    tta_sizes = [224, 256]
+
+
+class A100Profile(GPUProfile):
+    batch_size = 64
+    eval_batch_size = 96
+    num_workers = 6
+    prefetch_factor = 2
+    input_height = 384
+    input_width = 384
+    resize_size = 416
+    fc_hidden = 1024
+    grad_accum_steps = 2
+    use_torch_compile = False
+    compile_mode = 'default'
+    oom_headroom_ratio = 0.15
+    max_checkpoints = 3
+    pin_memory = True
+    tta_sizes = [288, 320, 352, 384, 416]
+    lr = 3e-3
+    backbone_lr_factor = 0.1
+    warmup_epochs = 5
+    dropout = 0.2
+    ema_decay = 0.999
+    aux_loss_weight = 0.3
+    bbox_loss_weight = 5.0
+    attn_diversity_weight = 0.1
+    attn_supervision_weight = 2.0
+    ordering_loss_weight = 2.0
+    multiscale_feat_dim = 512
+    pos_embed_channels = 64
+    feat_spatial_size = 40
+    roi_feat_dim = 256
+    transformer_heads = 4
+    transformer_layers = 4
+    head_interaction_layers = 2
+    num_attn_channels = 8
+    cutmix_alpha = 1.0
+    cutmix_prob = 0.5
+    erase_prob = 0.2
+    smooth = 0.1
+    aug_rotation_degrees = 10
+    aug_blur_prob = 0.15
+    roi_gt_prob = 0.8
+
+
+class AMDLargeProfile(GPUProfile):
+    batch_size = 256
+    eval_batch_size = 384
+    num_workers = 16
+    prefetch_factor = 4
+    input_height = 416
+    input_width = 416
+    resize_size = 448
+    fc_hidden = 1536
+    grad_accum_steps = 1
+    use_torch_compile = True
+    compile_mode = 'default'
+    use_gradient_checkpoint = False
+    oom_headroom_ratio = 0.10
+    max_checkpoints = 3
+    pin_memory = False
+    tta_sizes = [320, 352, 384, 416, 448]
+    lr = 3e-3
+    backbone_lr_factor = 0.1
+    warmup_epochs = 5
+    dropout = 0.2
+    ema_decay = 0.999
+    aux_loss_weight = 0.3
+    bbox_loss_weight = 5.0
+    attn_diversity_weight = 0.1
+    attn_supervision_weight = 2.0
+    ordering_loss_weight = 2.0
+    multiscale_feat_dim = 512
+    pos_embed_channels = 64
+    feat_spatial_size = 40
+    roi_feat_dim = 256
+    transformer_heads = 4
+    transformer_layers = 4
+    head_interaction_layers = 2
+    num_attn_channels = 8
+    cutmix_alpha = 1.0
+    cutmix_prob = 0.5
+    erase_prob = 0.2
+    smooth = 0.1
+    aug_rotation_degrees = 10
+    aug_blur_prob = 0.15
+    roi_gt_prob = 0.8
+
+
+def _detect_gpu_profile():
+    if GPU_PLATFORM == 'cpu':
+        return CPUProfile()
     if GPU_PLATFORM == 'amd_rocm':
-        if TOTAL_VRAM_GB >= 180:
-            return 256
-        elif TOTAL_VRAM_GB >= 120:
-            return 192
-        elif TOTAL_VRAM_GB >= 90:
-            return 128
+        if TOTAL_VRAM_GB >= 120:
+            return AMDLargeProfile()
         elif TOTAL_VRAM_GB >= 48:
-            return 96
-        elif TOTAL_VRAM_GB >= 24:
-            return 64
-        elif TOTAL_VRAM_GB >= 16:
-            return 48
-        elif TOTAL_VRAM_GB >= 8:
-            return 32
+            profile = GPUProfile()
+            profile.batch_size = 128
+            profile.eval_batch_size = 192
+            profile.num_workers = min(max(NUM_PHYSICAL_CORES - 4, 4), 12)
+            profile.prefetch_factor = 3
+            profile.pin_memory = False
+            profile.use_torch_compile = True
+            profile.compile_mode = 'default'
+            return profile
         else:
-            return 16
+            profile = GPUProfile()
+            profile.batch_size = 64
+            profile.eval_batch_size = 96
+            profile.num_workers = min(max(NUM_PHYSICAL_CORES - 2, 4), 8)
+            profile.pin_memory = False
+            profile.use_torch_compile = True
+            profile.compile_mode = 'default'
+            return profile
     else:
-        if TOTAL_VRAM_GB >= 45:
-            return 96
+        if TOTAL_VRAM_GB >= 40:
+            profile = GPUProfile()
+            profile.batch_size = 96
+            profile.eval_batch_size = 160
+            profile.num_workers = min(max(NUM_PHYSICAL_CORES - 2, 4), 12)
+            profile.prefetch_factor = 2
+            return profile
         elif TOTAL_VRAM_GB >= 24:
-            return 64
-        elif TOTAL_VRAM_GB >= 20:
-            return 32
+            return A100Profile()
         elif TOTAL_VRAM_GB >= 16:
-            return 32
+            profile = GPUProfile()
+            profile.batch_size = 32
+            profile.eval_batch_size = 64
+            profile.grad_accum_steps = 4
+            profile.num_workers = min(max(NUM_PHYSICAL_CORES - 2, 4), 8)
+            return profile
         elif TOTAL_VRAM_GB >= 8:
-            return 16
-        elif TOTAL_VRAM_GB >= 4:
-            return 8
+            profile = GPUProfile()
+            profile.batch_size = 16
+            profile.eval_batch_size = 32
+            profile.grad_accum_steps = 8
+            profile.num_workers = min(max(NUM_PHYSICAL_CORES - 1, 2), 4)
+            return profile
         else:
-            return 8
+            return CPUProfile()
 
 
-def _auto_num_workers():
-    """Automatically determine number of data loader workers based on CPU cores"""
-    if IS_MODELSCOPE:
-        return min(max(NUM_PHYSICAL_CORES - 2, 4), 16)
-    else:
-        return min(max(NUM_PHYSICAL_CORES - 1, 4), 16) if os.name != 'nt' else 0
-
-
-NUM_WORKERS = _auto_num_workers()
-NUM_HEADS = 6
+ACTIVE_PROFILE = _detect_gpu_profile()
 
 
 class Config:
-    batch_size = _auto_batch_size()
-    lr = 3e-3
-    backbone_lr_factor = 0.1
+    batch_size = ACTIVE_PROFILE.batch_size
+    lr = ACTIVE_PROFILE.lr
+    backbone_lr_factor = ACTIVE_PROFILE.backbone_lr_factor
     momentum = 0.9
     weights_decay = 5e-4
     class_num = 11
@@ -106,44 +254,51 @@ class Config:
     pretrained = None
     start_epoch = 0
     epoches = 120
-    warmup_epochs = 5
-    smooth = 0.1
-    erase_prob = 0.2
-    num_heads = NUM_HEADS
-    input_height = 384
-    input_width = 384
-    resize_size = 416
-    tta_sizes = [288, 320, 352, 384, 416]
-    dropout = 0.2
-    fc_hidden = 1024
-    ema_decay = 0.999
-    cutmix_alpha = 1.0
-    cutmix_prob = 0.5
+    warmup_epochs = ACTIVE_PROFILE.warmup_epochs
+    smooth = ACTIVE_PROFILE.smooth
+    erase_prob = ACTIVE_PROFILE.erase_prob
+    num_heads = 6
+    input_height = ACTIVE_PROFILE.input_height
+    input_width = ACTIVE_PROFILE.input_width
+    resize_size = ACTIVE_PROFILE.resize_size
+    tta_sizes = ACTIVE_PROFILE.tta_sizes
+    dropout = ACTIVE_PROFILE.dropout
+    fc_hidden = ACTIVE_PROFILE.fc_hidden
+    ema_decay = ACTIVE_PROFILE.ema_decay
+    cutmix_alpha = ACTIVE_PROFILE.cutmix_alpha
+    cutmix_prob = ACTIVE_PROFILE.cutmix_prob
     train_eval_interval = 10
-    use_torch_compile = GPU_PLATFORM == 'amd_rocm'
-    attn_diversity_weight = 0.1
-    multiscale_feat_dim = 512
-    bbox_loss_weight = 5.0
-    pos_embed_channels = 64
-    feat_spatial_size = 40
-    ordering_loss_weight = 2.0
+    use_torch_compile = ACTIVE_PROFILE.use_torch_compile
+    compile_mode = ACTIVE_PROFILE.compile_mode
+    attn_diversity_weight = ACTIVE_PROFILE.attn_diversity_weight
+    multiscale_feat_dim = ACTIVE_PROFILE.multiscale_feat_dim
+    bbox_loss_weight = ACTIVE_PROFILE.bbox_loss_weight
+    pos_embed_channels = ACTIVE_PROFILE.pos_embed_channels
+    feat_spatial_size = ACTIVE_PROFILE.feat_spatial_size
+    ordering_loss_weight = ACTIVE_PROFILE.ordering_loss_weight
     roi_refine = True
-    roi_feat_dim = 256
+    roi_feat_dim = ACTIVE_PROFILE.roi_feat_dim
     roi_teacher_forcing = True
-    transformer_heads = 4
-    transformer_layers = 4
+    transformer_heads = ACTIVE_PROFILE.transformer_heads
+    transformer_layers = ACTIVE_PROFILE.transformer_layers
     model_type = 'fpn_multihead'
     keep_aspect_ratio = True
-    attn_supervision_weight = 2.0
-    head_interaction_layers = 2
-    aug_rotation_degrees = 10
-    aug_blur_prob = 0.15
-    roi_gt_prob = 0.8
-    num_attn_channels = 8
-    use_char_level_acc = True
+    attn_supervision_weight = ACTIVE_PROFILE.attn_supervision_weight
+    head_interaction_layers = ACTIVE_PROFILE.head_interaction_layers
+    aug_rotation_degrees = ACTIVE_PROFILE.aug_rotation_degrees
+    aug_blur_prob = ACTIVE_PROFILE.aug_blur_prob
+    roi_gt_prob = ACTIVE_PROFILE.roi_gt_prob
+    num_attn_channels = ACTIVE_PROFILE.num_attn_channels
     early_stopping_patience = 20
-    aux_loss_weight = 0.3
-    grad_accum_steps = max(1, 128 // batch_size)
+    aux_loss_weight = ACTIVE_PROFILE.aux_loss_weight
+    grad_accum_steps = ACTIVE_PROFILE.grad_accum_steps
+    eval_batch_size = ACTIVE_PROFILE.eval_batch_size
+    max_checkpoints = ACTIVE_PROFILE.max_checkpoints
+    oom_headroom_ratio = ACTIVE_PROFILE.oom_headroom_ratio
+    pin_memory = ACTIVE_PROFILE.pin_memory
+    prefetch_factor = ACTIVE_PROFILE.prefetch_factor
+    num_workers = ACTIVE_PROFILE.num_workers
+    use_gradient_checkpoint = ACTIVE_PROFILE.use_gradient_checkpoint
 
 
 config = Config()
@@ -164,14 +319,24 @@ t.hub.set_dir(os.path.join(BASE_DIR, 'torch_hub'))
 
 
 def print_env_info():
-    """Print environment configuration information"""
     print("=" * 80)
     print(f"GPU Platform: {GPU_PLATFORM.upper()}")
     print(f"Total VRAM: {TOTAL_VRAM_GB:.1f} GB")
     print(f"Physical CPU Cores: {NUM_PHYSICAL_CORES}")
-    print(f"Data Loader Workers: {NUM_WORKERS}")
-    print(f"Batch Size: {config.batch_size}")
+    print(f"Active Profile: {ACTIVE_PROFILE.__class__.__name__}")
+    print(f"Data Loader Workers: {config.num_workers}")
+    print(f"Train Batch Size: {config.batch_size}")
+    print(f"Eval Batch Size: {config.eval_batch_size}")
     print(f"Gradient Accumulation Steps: {config.grad_accum_steps}")
     print(f"Equivalent Batch Size: {config.batch_size * config.grad_accum_steps}")
+    print(f"Input Size: {config.input_height}x{config.input_width}")
+    print(f"FC Hidden: {config.fc_hidden}")
     print(f"Use Torch Compile: {config.use_torch_compile}")
+    if config.use_torch_compile:
+        print(f"Compile Mode: {config.compile_mode}")
+    print(f"Gradient Checkpoint: {config.use_gradient_checkpoint}")
+    print(f"Pin Memory: {config.pin_memory}")
+    print(f"Prefetch Factor: {config.prefetch_factor}")
+    print(f"OOM Headroom: {config.oom_headroom_ratio * 100:.0f}%")
+    print(f"Max Checkpoints: {config.max_checkpoints}")
     print("=" * 80)
