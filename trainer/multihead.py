@@ -48,7 +48,7 @@ class MultiHeadTrainer(BaseTrainer):
 
     def __init__(self, val=True, model_type=None):
         super().__init__()
-        print(f'Using device: {self.device}')
+        self.logger.logger.info(f'Using device: {self.device}')
         self._model_type = model_type or config.model_type
 
         self._gpu_sanity_check()
@@ -60,7 +60,7 @@ class MultiHeadTrainer(BaseTrainer):
             self.model.load_state_dict(ckpt['model'], strict=False)
             if 'model_type' in ckpt:
                 self._model_type = ckpt['model_type']
-            print(f'Load model from {config.pretrained}')
+            self.logger.logger.info(f'Load model from {config.pretrained}')
 
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
         self._compile_logger = CompileLogger.get_instance()
@@ -114,8 +114,8 @@ class MultiHeadTrainer(BaseTrainer):
                 self._current_epoch = ckpt['epoch']
             if 'train_log' in ckpt:
                 self.train_log = ckpt['train_log']
-            print(f'Restored best_acc: {self.best_acc * 100:.2f}%')
-            print('Warning: Optimizer and scheduler NOT restored. Using new config.')
+            self.logger.logger.info(f'Restored best_acc: {self.best_acc * 100:.2f}%')
+            self.logger.logger.warning('Optimizer and scheduler NOT restored. Using new config.')
 
         self._gpu_warmup()
 
@@ -134,22 +134,22 @@ class MultiHeadTrainer(BaseTrainer):
         self._diagnose_dataloader()
 
     def _diagnose_dataloader(self):
-        print('[DIAG] Testing DataLoader first batch load...')
+        self.logger.logger.info('[DIAG] Testing DataLoader first batch load...')
         diag_start = time.time()
         try:
             sample_batch = next(iter(self.train_loader))
             diag_time = time.time() - diag_start
             img_shape = sample_batch[0].shape
-            print(f'[DIAG] First batch loaded in {diag_time:.2f}s, img_shape={img_shape}')
+            self.logger.logger.info(f'[DIAG] First batch loaded in {diag_time:.2f}s, img_shape={img_shape}')
             if diag_time > 30:
-                print(f'[DIAG] WARNING: Data loading is very slow ({diag_time:.1f}s). '
+                self.logger.logger.warning(f'[DIAG] Data loading is very slow ({diag_time:.1f}s). '
                       f'Consider reducing num_workers or checking disk I/O.')
             del sample_batch
         except Exception as e:
             diag_time = time.time() - diag_start
-            print(f'[DIAG] DataLoader test FAILED after {diag_time:.2f}s: {e}')
+            self.logger.logger.error(f'[DIAG] DataLoader test FAILED after {diag_time:.2f}s: {e}')
             if config.num_workers > 0:
-                print(f'[DIAG] Falling back to num_workers=0 due to DataLoader failure')
+                self.logger.logger.warning('[DIAG] Falling back to num_workers=0 due to DataLoader failure')
                 config.num_workers = 0
                 config.prefetch_factor = None
                 config.persistent_workers = False
@@ -166,10 +166,10 @@ class MultiHeadTrainer(BaseTrainer):
             return
         warmup_bs = config.batch_size
         compile_info = " (torch.compile)" if config.use_torch_compile else ""
-        print(f'[WARMUP] Starting GPU warmup with bs={warmup_bs}{compile_info}...')
+        self._compile_logger.logger.info(f'[WARMUP] Starting GPU warmup with bs={warmup_bs}{compile_info}...')
         if config.use_torch_compile:
-            print(f'[WARMUP] Kernel compilation in progress (may take 5-15 min on first run)')
-            print(f'[WARMUP] Subsequent runs will use cached kernels and be much faster')
+            self._compile_logger.logger.info('[WARMUP] Kernel compilation in progress (may take 5-15 min on first run)')
+            self._compile_logger.logger.info('[WARMUP] Subsequent runs will use cached kernels and be much faster')
 
         heartbeat_stop = threading.Event()
         warmup_start = time.time()
@@ -178,7 +178,7 @@ class MultiHeadTrainer(BaseTrainer):
             elapsed = 0
             while not heartbeat_stop.wait(30):
                 elapsed += 30
-                print(f'[WARMUP] Still compiling kernels... ({elapsed}s elapsed)')
+                self._compile_logger.logger.info(f'[WARMUP] Still compiling kernels... ({elapsed}s elapsed)')
 
         ht = threading.Thread(target=_heartbeat, daemon=True)
         ht.start()
@@ -186,7 +186,7 @@ class MultiHeadTrainer(BaseTrainer):
         try:
             with self._compile_logger.phase('warmup_inference'):
                 dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
-                print(f'[WARMUP] Running inference pass (bs={warmup_bs})...')
+                self._compile_logger.logger.info(f'[WARMUP] Running inference pass (bs={warmup_bs})...')
                 with t.no_grad(), autocast(self.device.type, enabled=self.use_amp):
                     _ = self.model(dummy)
                 t.cuda.synchronize()
@@ -195,7 +195,7 @@ class MultiHeadTrainer(BaseTrainer):
 
             warmup_time = time.time() - warmup_start
             self._compile_logger.log_warmup_summary(warmup_time, 1, 1)
-            print(f'[WARMUP] Primary warmup completed in {warmup_time:.1f}s (inference with bs={warmup_bs})')
+            self._compile_logger.logger.info(f'[WARMUP] Primary warmup completed in {warmup_time:.1f}s (inference with bs={warmup_bs})')
 
             if config.use_torch_compile:
                 with self._compile_logger.phase('warmup_tta_shapes'):
@@ -203,7 +203,7 @@ class MultiHeadTrainer(BaseTrainer):
 
         except RuntimeError as e:
             if 'out of memory' in str(e).lower():
-                print(f'[WARMUP] OOM with bs={warmup_bs}, trying bs={warmup_bs // 4}...')
+                self._compile_logger.logger.warning(f'[WARMUP] OOM with bs={warmup_bs}, trying bs={warmup_bs // 4}...')
                 t.cuda.empty_cache()
                 try:
                     warmup_bs = warmup_bs // 4
@@ -215,20 +215,18 @@ class MultiHeadTrainer(BaseTrainer):
                     t.cuda.empty_cache()
                     warmup_time = time.time() - warmup_start
                     self._compile_logger.log_warmup_summary(warmup_time, 1, 1)
-                    print(f'[WARMUP] Fallback warmup completed in {warmup_time:.1f}s (inference with bs={warmup_bs})')
+                    self._compile_logger.logger.info(f'[WARMUP] Fallback warmup completed in {warmup_time:.1f}s (inference with bs={warmup_bs})')
                 except Exception as e2:
-                    print(f'[WARMUP] Fallback warmup also failed: {e2}')
+                    self._compile_logger.logger.error(f'[WARMUP] Fallback warmup also failed: {e2}')
                     t.cuda.empty_cache()
             else:
-                print(f'[WARMUP] GPU warmup failed: {e}')
+                self._compile_logger.logger.error(f'[WARMUP] GPU warmup failed: {e}')
                 t.cuda.empty_cache()
         except Exception as e:
             err_str = str(e).lower()
             if config.use_torch_compile and ('compile' in err_str or 'triton' in err_str or 'inductor' in err_str):
-                print(f'[WARMUP] torch.compile failed during warmup: {e}')
-                print(f'[WARMUP] Disabling torch.compile and falling back to eager mode')
-                self._compile_logger.logger.warning(
-                    f'[WARMUP] torch.compile failed, falling back to eager: {e}')
+                self._compile_logger.logger.error(f'[WARMUP] torch.compile failed during warmup: {e}')
+                self._compile_logger.logger.warning('[WARMUP] Disabling torch.compile and falling back to eager mode')
                 config.use_torch_compile = False
                 self.model = self._get_raw_model()
                 if self.ema is not None:
@@ -243,12 +241,12 @@ class MultiHeadTrainer(BaseTrainer):
                     del dummy
                     t.cuda.empty_cache()
                     warmup_time = time.time() - warmup_start
-                    print(f'[WARMUP] Eager mode warmup completed in {warmup_time:.1f}s')
+                    self._compile_logger.logger.info(f'[WARMUP] Eager mode warmup completed in {warmup_time:.1f}s')
                 except Exception as e2:
-                    print(f'[WARMUP] Eager mode warmup also failed: {e2}')
+                    self._compile_logger.logger.error(f'[WARMUP] Eager mode warmup also failed: {e2}')
                     t.cuda.empty_cache()
             else:
-                print(f'[WARMUP] GPU warmup failed: {e}')
+                self._compile_logger.logger.error(f'[WARMUP] GPU warmup failed: {e}')
                 t.cuda.empty_cache()
         finally:
             heartbeat_stop.set()
@@ -261,7 +259,7 @@ class MultiHeadTrainer(BaseTrainer):
             return
         tta_shapes = [(s, s) for s in config.tta_sizes]
         eval_bs = min(config.eval_batch_size, warmup_bs)
-        print(f'[WARMUP] Warming up TTA shapes: {tta_shapes} with bs={eval_bs}...')
+        self._compile_logger.logger.info(f'[WARMUP] Warming up TTA shapes: {tta_shapes} with bs={eval_bs}...')
         tta_start = time.time()
         for h, w in tta_shapes:
             try:
@@ -284,10 +282,10 @@ class MultiHeadTrainer(BaseTrainer):
                         pass
                     t.cuda.empty_cache()
                 else:
-                    print(f'[WARMUP] TTA shape ({h},{w}) warmup failed: {e}')
+                    self._compile_logger.logger.error(f'[WARMUP] TTA shape ({h},{w}) warmup failed: {e}')
         t.cuda.empty_cache()
         tta_time = time.time() - tta_start
-        print(f'[WARMUP] TTA shape warmup completed in {tta_time:.1f}s')
+        self._compile_logger.logger.info(f'[WARMUP] TTA shape warmup completed in {tta_time:.1f}s')
 
     def _compute_class_weights(self):
         class_counts = t.zeros(config.class_num)
@@ -304,8 +302,8 @@ class MultiHeadTrainer(BaseTrainer):
         active = class_weights[:10]
         class_weights[:10] = active * config.class_num / active.sum()
         class_weights = class_weights.to(self.device)
-        print(f'Computed class weights from JSON: {class_weights.cpu().numpy()}')
-        print(f'   Class 10 (empty) weight: {class_weights[10].item():.3f} (excluded from loss)')
+        self.logger.logger.info(f'Computed class weights from JSON: {class_weights.cpu().numpy()}')
+        self.logger.logger.info(f'   Class 10 (empty) weight: {class_weights[10].item():.3f} (excluded from loss)')
         return class_weights
 
     def _make_loader(self, dataset, batch_size, shuffle=False, drop_last=False, collate_fn=None):
@@ -321,7 +319,7 @@ class MultiHeadTrainer(BaseTrainer):
             kwargs['multiprocessing_context'] = config.multiprocessing_context
         if collate_fn is not None:
             kwargs['collate_fn'] = collate_fn
-        print(f'[DataLoader] batch={batch_size}, workers={config.num_workers}, '
+        self.logger.logger.info(f'[DataLoader] batch={batch_size}, workers={config.num_workers}, '
               f'pin_mem={config.pin_memory}, ctx={config.multiprocessing_context}, '
               f'persistent={config.persistent_workers}, dataset={len(dataset)}')
         return DataLoader(dataset, **kwargs)

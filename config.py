@@ -3,20 +3,35 @@ import sys
 import multiprocessing
 import torch as t
 
-
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = '/mnt/workspace' if os.path.exists('/mnt/workspace') else SCRIPT_DIR
 
 IS_MODELSCOPE = os.path.exists('/mnt/workspace')
 
-os.environ.setdefault('MIOPEN_DISABLE_CACHE', '0')
-os.environ.setdefault('MIOPEN_FIND_MODE', '2')
-os.environ.setdefault('MIOPEN_USER_DB_PATH', os.path.join(BASE_DIR, 'miopen_cache'))
-os.environ.setdefault('TRITON_CACHE_DIR', os.path.join(BASE_DIR, 'triton_cache'))
-os.environ.setdefault('TORCHINDUCTOR_CACHE_DIR', os.path.join(BASE_DIR, 'inductor_cache'))
-if IS_MODELSCOPE:
-    os.environ.setdefault('TORCH_USE_HIP_DSA', '1')
-    os.environ.setdefault('PYTORCH_HIP_ALLOC_CONF', 'expandable_segments:True')
+from utils.platform import (
+    is_amd_rocm, is_nvidia_cuda, get_platform,
+    get_total_vram_gb, get_gfx_arch, get_rocm_version,
+    is_triton_available, is_compile_available, get_precision_config,
+    get_cache_dirs, NUM_PHYSICAL_CORES as _NUM_PHYSICAL_CORES,
+)
+
+GPU_PLATFORM = get_platform()
+TOTAL_VRAM_GB = get_total_vram_gb()
+NUM_PHYSICAL_CORES = _NUM_PHYSICAL_CORES
+
+IS_AMD = is_amd_rocm()
+IS_NVIDIA = is_nvidia_cuda()
+
+if IS_AMD:
+    os.environ.setdefault('MIOPEN_DISABLE_CACHE', '0')
+    os.environ.setdefault('MIOPEN_FIND_MODE', '2')
+    cache_dirs = get_cache_dirs()
+    os.environ.setdefault('MIOPEN_USER_DB_PATH', cache_dirs['miopen'])
+    os.environ.setdefault('TRITON_CACHE_DIR', cache_dirs['triton'])
+    os.environ.setdefault('TORCHINDUCTOR_CACHE_DIR', cache_dirs['inductor'])
+    if IS_MODELSCOPE:
+        os.environ.setdefault('TORCH_USE_HIP_DSA', '1')
+        os.environ.setdefault('PYTORCH_HIP_ALLOC_CONF', 'expandable_segments:True')
 
 _GFX_VERSION_MAP = {
     'gfx900': '9.0.0',
@@ -32,42 +47,11 @@ _GFX_VERSION_MAP = {
     'gfx1100': '11.0.0',
     'gfx1101': '11.0.0',
     'gfx1102': '11.0.0',
-    'gfx1103': '11.0.0',
     'gfx1150': '11.5.0',
     'gfx1151': '11.5.1',
     'gfx1200': '12.0.0',
     'gfx1201': '12.0.1',
 }
-
-_GPU_NAME_GFX_HINTS = {
-    'mi250': 'gfx90a', 'mi210': 'gfx90a',
-    'mi100': 'gfx908', 'mi50': 'gfx906',
-    'mi300x': 'gfx942', 'mi300a': 'gfx941', 'mi300': 'gfx940',
-    'rx 7900': 'gfx1100', 'rx 7800': 'gfx1101', 'rx 7700': 'gfx1101',
-    'rx 7600': 'gfx1102',
-    'rx 6900': 'gfx1030', 'rx 6800': 'gfx1030',
-    'rx 6700': 'gfx1031', 'rx 6600': 'gfx1032',
-}
-
-
-def _get_gfx_arch():
-    if not t.cuda.is_available():
-        return None
-    try:
-        props = t.cuda.get_device_properties(0)
-        gpu_name = getattr(props, 'name', '').lower()
-        for hint, arch in _GPU_NAME_GFX_HINTS.items():
-            if hint in gpu_name:
-                return arch
-        gcn_arch = getattr(props, 'gcnArchName', '').split(':')[0].strip()
-        if gcn_arch and gcn_arch in _GFX_VERSION_MAP:
-            return gcn_arch
-        arch_list = t.cuda.get_arch_list()
-        if arch_list and len(arch_list) == 1:
-            return arch_list[0]
-    except Exception:
-        pass
-    return None
 
 
 def _should_override_gfx(gfx_arch):
@@ -87,7 +71,9 @@ def _configure_hsa_override():
         return
     if not IS_MODELSCOPE:
         return
-    gfx_arch = _get_gfx_arch()
+    if not IS_AMD:
+        return
+    gfx_arch = get_gfx_arch()
     if gfx_arch is not None:
         if not _should_override_gfx(gfx_arch):
             print(f'[HSA] GPU arch {gfx_arch} is natively supported by PyTorch, '
@@ -113,81 +99,15 @@ def _configure_hsa_override():
 _configure_hsa_override()
 
 
-def _is_triton_available():
-    if sys.platform == 'win32':
-        return False
-    try:
-        import triton
-        return True
-    except (ImportError, OSError):
-        return False
+TRITON_AVAILABLE = is_triton_available()
+COMPILE_AVAILABLE = is_compile_available()
 
 
-def _is_compile_available():
-    if not t.cuda.is_available():
-        return False
-    if sys.platform == 'win32':
-        return False
-    try:
-        import torch._inductor
-        return True
-    except (ImportError, OSError):
-        return False
-
-
-TRITON_AVAILABLE = _is_triton_available()
-COMPILE_AVAILABLE = _is_compile_available()
-
-
-def _detect_gpu_platform():
-    if not t.cuda.is_available():
-        return 'cpu'
-    if hasattr(t.version, 'hip') and t.version.hip is not None:
-        return 'amd_rocm'
-    try:
-        props = t.cuda.get_device_properties(0)
-        gpu_name = props.name.lower()
-        vram = getattr(props, 'total_mem', getattr(props, 'total_memory', 0)) / (1024 ** 3)
-        if 'amd' in gpu_name or 'radeon' in gpu_name or 'instinct' in gpu_name or 'mi2' in gpu_name:
-            return 'amd_rocm'
-        if not gpu_name.strip() and vram > 100:
-            return 'amd_rocm'
-    except Exception:
-        pass
-    return 'nvidia_cuda'
-
-
-def _get_total_vram_gb():
-    if not t.cuda.is_available():
-        return 0
-    try:
-        props = t.cuda.get_device_properties(0)
-        return getattr(props, 'total_mem', getattr(props, 'total_memory', 0)) / (1024 ** 3)
-    except Exception:
-        return 0
-
-
-GPU_PLATFORM = _detect_gpu_platform()
-TOTAL_VRAM_GB = _get_total_vram_gb()
-NUM_PHYSICAL_CORES = multiprocessing.cpu_count() or 2
-
-
-def _detect_rocm_version():
-    if not hasattr(t.version, 'hip') or t.version.hip is None:
-        return None
-    try:
-        parts = t.version.hip.split('.')
-        major, minor = int(parts[0]), int(parts[1])
-        return (major, minor)
-    except Exception:
-        return None
-
-
-ROCM_VERSION = _detect_rocm_version()
+ROCM_VERSION = get_rocm_version()
 
 
 def _check_rocm_compatibility():
-    if GPU_PLATFORM != 'amd_rocm':
+    if not IS_AMD:
         return
     if ROCM_VERSION is not None:
         major, minor = ROCM_VERSION
@@ -196,13 +116,13 @@ def _check_rocm_compatibility():
                   f'may crash (HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION). '
                   f'Consider upgrading to ROCm 6.3+.')
         if major == 7 and minor == 0:
-            gfx = _get_gfx_arch()
+            gfx = get_gfx_arch()
             if gfx and gfx.startswith('gfx12'):
                 print(f'[ROCM-WARN] ROCm 7.0 + RDNA4 ({gfx}) detected: random memory access '
                       f'faults may occur due to expert scheduling mode. '
                       f'Consider adding amdgpu.cwsr_enable=0 to kernel boot params.')
     pytorch_ver = t.__version__
-    if pytorch_ver.startswith('2.8.0') and GPU_PLATFORM == 'amd_rocm':
+    if pytorch_ver.startswith('2.8.0'):
         try:
             import rocblas
         except ImportError:
@@ -224,7 +144,7 @@ _check_rocm_compatibility()
 
 
 def _configure_rocm_blas_backend():
-    if GPU_PLATFORM != 'amd_rocm':
+    if not IS_AMD:
         return
     try:
         pytorch_ver = t.__version__
@@ -248,6 +168,7 @@ def _configure_rocm_blas_backend():
 
 
 class GPUProfile:
+    platform = 'any'
     batch_size = 32
     eval_batch_size = 64
     num_workers = 4
@@ -296,6 +217,7 @@ class GPUProfile:
 
 
 class CPUProfile(GPUProfile):
+    platform = 'cpu'
     batch_size = 32
     eval_batch_size = 32
     num_workers = 0
@@ -311,6 +233,7 @@ class CPUProfile(GPUProfile):
 
 
 class A100Profile(GPUProfile):
+    platform = 'nvidia_cuda'
     batch_size = 64
     eval_batch_size = 96
     num_workers = 6
@@ -353,32 +276,125 @@ class A100Profile(GPUProfile):
     roi_gt_prob = 0.8
 
 
+class AMDMidProfile(GPUProfile):
+    platform = 'amd_rocm'
+    batch_size = 96
+    eval_batch_size = 128
+    num_workers = 12
+    prefetch_factor = 3
+    persistent_workers = True
+    input_height = 384
+    input_width = 384
+    resize_size = 416
+    fc_hidden = 1024
+    grad_accum_steps = 2
+    use_torch_compile = True
+    compile_mode = 'default'
+    compile_dynamic = False
+    use_gradient_checkpoint = True
+    oom_headroom_ratio = 0.12
+    pin_memory = False
+    tta_sizes = [320, 352, 384, 416]
+    lr = 4e-3
+    backbone_lr_factor = 0.1
+    warmup_epochs = 6
+    dropout = 0.15
+    ema_decay = 0.9995
+    aux_loss_weight = 0.35
+    bbox_loss_weight = 5.0
+    attn_diversity_weight = 0.1
+    attn_supervision_weight = 2.0
+    ordering_loss_weight = 2.0
+    multiscale_feat_dim = 512
+    pos_embed_channels = 64
+    feat_spatial_size = 40
+    roi_feat_dim = 256
+    transformer_heads = 4
+    transformer_layers = 4
+    head_interaction_layers = 2
+    num_attn_channels = 8
+    cutmix_alpha = 1.0
+    cutmix_prob = 0.5
+    erase_prob = 0.15
+    smooth = 0.1
+    aug_rotation_degrees = 10
+    aug_blur_prob = 0.15
+    roi_gt_prob = 0.8
+
+
 class AMDLargeProfile(GPUProfile):
-    batch_size = 128
-    eval_batch_size = 192
-    num_workers = 16
+    platform = 'amd_rocm'
+    batch_size = 192
+    eval_batch_size = 256
+    num_workers = 20
     prefetch_factor = 4
     persistent_workers = True
-    multiprocessing_context = 'fork'
     input_height = 416
     input_width = 416
     resize_size = 448
     fc_hidden = 1536
-    grad_accum_steps = 2
+    grad_accum_steps = 1
     use_torch_compile = True
     compile_mode = 'default'
-    compile_dynamic = True
-    use_gradient_checkpoint = False
-    oom_headroom_ratio = 0.10
+    compile_dynamic = False
+    use_gradient_checkpoint = True
+    oom_headroom_ratio = 0.08
     max_checkpoints = 3
     pin_memory = False
-    tta_sizes = [320, 352, 384, 416, 448]
+    tta_sizes = [384, 416]
     lr = 4e-3
     backbone_lr_factor = 0.1
-    warmup_epochs = 8
+    warmup_epochs = 6
     dropout = 0.15
     ema_decay = 0.9995
-    aux_loss_weight = 0.4
+    aux_loss_weight = 0.35
+    bbox_loss_weight = 5.0
+    attn_diversity_weight = 0.1
+    attn_supervision_weight = 2.0
+    ordering_loss_weight = 2.0
+    multiscale_feat_dim = 512
+    pos_embed_channels = 64
+    feat_spatial_size = 40
+    roi_feat_dim = 256
+    transformer_heads = 4
+    transformer_layers = 4
+    head_interaction_layers = 2
+    num_attn_channels = 8
+    cutmix_alpha = 1.0
+    cutmix_prob = 0.5
+    erase_prob = 0.15
+    smooth = 0.1
+    aug_rotation_degrees = 10
+    aug_blur_prob = 0.15
+    roi_gt_prob = 0.8
+
+
+class AMDMI250Profile(GPUProfile):
+    platform = 'amd_rocm'
+    batch_size = 256
+    eval_batch_size = 384
+    num_workers = 24
+    prefetch_factor = 6
+    persistent_workers = True
+    input_height = 448
+    input_width = 448
+    resize_size = 512
+    fc_hidden = 1536
+    grad_accum_steps = 1
+    use_torch_compile = True
+    compile_mode = 'default'
+    compile_dynamic = False
+    use_gradient_checkpoint = True
+    oom_headroom_ratio = 0.05
+    max_checkpoints = 3
+    pin_memory = False
+    tta_sizes = [384, 416]
+    lr = 5e-3
+    backbone_lr_factor = 0.1
+    warmup_epochs = 5
+    dropout = 0.15
+    ema_decay = 0.9995
+    aux_loss_weight = 0.35
     bbox_loss_weight = 5.0
     attn_diversity_weight = 0.1
     attn_supervision_weight = 2.0
@@ -403,29 +419,24 @@ class AMDLargeProfile(GPUProfile):
 def _detect_gpu_profile():
     if GPU_PLATFORM == 'cpu':
         return CPUProfile()
-    if GPU_PLATFORM == 'amd_rocm':
-        if TOTAL_VRAM_GB >= 120:
+
+    if IS_AMD:
+        if TOTAL_VRAM_GB >= 180:
+            profile = AMDMI250Profile()
+        elif TOTAL_VRAM_GB >= 120:
             profile = AMDLargeProfile()
         elif TOTAL_VRAM_GB >= 48:
-            profile = GPUProfile()
-            profile.batch_size = 96
-            profile.eval_batch_size = 128
-            profile.num_workers = min(max(NUM_PHYSICAL_CORES - 4, 8), 16)
-            profile.prefetch_factor = 3
-            profile.pin_memory = False
-            profile.use_torch_compile = True
-            profile.compile_mode = 'default'
-            profile.compile_dynamic = True
-            profile.grad_accum_steps = 2
+            profile = AMDMidProfile()
         else:
-            profile = GPUProfile()
+            profile = AMDMidProfile()
             profile.batch_size = 64
             profile.eval_batch_size = 96
             profile.num_workers = min(max(NUM_PHYSICAL_CORES - 2, 4), 8)
-            profile.pin_memory = False
-            profile.use_torch_compile = True
-            profile.compile_mode = 'default'
-    else:
+            profile.compile_dynamic = True
+        profile.multiprocessing_context = 'spawn'
+        _configure_rocm_blas_backend()
+
+    elif IS_NVIDIA:
         if TOTAL_VRAM_GB >= 40:
             profile = GPUProfile()
             profile.batch_size = 96
@@ -448,12 +459,10 @@ def _detect_gpu_profile():
             profile.num_workers = min(max(NUM_PHYSICAL_CORES - 1, 2), 4)
         else:
             return CPUProfile()
+        profile.multiprocessing_context = 'fork'
 
-    if GPU_PLATFORM == 'amd_rocm' and profile.multiprocessing_context is not None:
-        profile.multiprocessing_context = 'spawn'
-
-    if GPU_PLATFORM == 'amd_rocm':
-        _configure_rocm_blas_backend()
+    else:
+        return CPUProfile()
 
     if profile.use_torch_compile and not COMPILE_AVAILABLE:
         print(f'[COMPILE] torch.compile not available on this platform '
@@ -599,7 +608,7 @@ def print_env_info():
     print(f"GPU Platform: {GPU_PLATFORM.upper()}")
     print(f"Total VRAM: {TOTAL_VRAM_GB:.1f} GB")
     print(f"Physical CPU Cores: {NUM_PHYSICAL_CORES}")
-    if GPU_PLATFORM == 'amd_rocm':
+    if IS_AMD:
         rocm_str = f"{ROCM_VERSION[0]}.{ROCM_VERSION[1]}" if ROCM_VERSION else "unknown"
         print(f"ROCm Version: {rocm_str}")
         hip_ver = getattr(t.version, 'hip', None)
@@ -610,12 +619,19 @@ def print_env_info():
             print(f"BLAS Backend: {blas_backend}")
         except Exception:
             pass
-        gfx = _get_gfx_arch()
+        gfx = get_gfx_arch()
         if gfx:
             print(f"GPU Arch: {gfx}")
         hsa_ver = os.environ.get('HSA_OVERRIDE_GFX_VERSION', 'not set')
         print(f"HSA_OVERRIDE_GFX_VERSION: {hsa_ver}")
-    print(f"Active Profile: {ACTIVE_PROFILE.__class__.__name__}")
+    elif IS_NVIDIA:
+        cuda_ver = t.version.cuda if t.cuda.is_available() else 'N/A'
+        print(f"CUDA Version: {cuda_ver}")
+        if t.cuda.is_available():
+            print(f"GPU Name: {t.cuda.get_device_name(0)}")
+        precision_config = get_precision_config()
+        print(f"TF32 matmul: {'enabled' if precision_config['tf32_enabled'] else 'disabled'}")
+    print(f"Active Profile: {ACTIVE_PROFILE.__class__.__name__} (platform={ACTIVE_PROFILE.platform})")
     print(f"Data Loader Workers: {config.num_workers}")
     print(f"Train Batch Size: {config.batch_size}")
     print(f"Eval Batch Size: {config.eval_batch_size}")

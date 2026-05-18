@@ -10,31 +10,10 @@ from contextlib import contextmanager
 
 import torch as t
 
+from utils.platform import is_triton_available, is_compile_available
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(_SCRIPT_DIR)
-
-
-def is_triton_available():
-    if sys.platform == 'win32':
-        return False
-    try:
-        import triton
-        return True
-    except (ImportError, OSError):
-        return False
-
-
-def is_compile_available():
-    if not t.cuda.is_available():
-        return False
-    if sys.platform == 'win32':
-        return False
-    try:
-        import torch._inductor
-        return True
-    except (ImportError, OSError):
-        return False
 
 
 def configure_dynamo_cache(cache_size_limit=256, accumulated_cache_size_limit=512):

@@ -14,6 +14,7 @@ from torch.amp import GradScaler
 from datetime import datetime
 from config import config, SCRIPT_DIR, GPU_PLATFORM, TOTAL_VRAM_GB, NUM_PHYSICAL_CORES
 from utils.compile_utils import get_raw_model as _get_raw_model_external
+from utils.platform import is_hip_error, is_cuda_error, is_nvidia_cuda
 
 
 class TrainingLogger:
@@ -209,7 +210,7 @@ class BaseTrainer:
             t.cuda.empty_cache()
         except RuntimeError as e:
             err_str = str(e).lower()
-            if 'hip' in err_str or 'illegal' in err_str or 'cuda' in err_str or 'aperture' in err_str:
+            if is_hip_error(err_str) or is_cuda_error(err_str):
                 print(f'[GPU-CHECK] GPU sanity check FAILED (basic ops): {e}')
                 self._handle_gpu_check_failure(e)
                 return
@@ -224,7 +225,7 @@ class BaseTrainer:
             t.cuda.empty_cache()
         except RuntimeError as e:
             err_str = str(e).lower()
-            if 'hip' in err_str or 'illegal' in err_str or 'cuda' in err_str or 'aperture' in err_str or 'miopen' in err_str:
+            if is_hip_error(err_str) or is_cuda_error(err_str):
                 print(f'[GPU-CHECK] GPU sanity check FAILED (conv2d): {e}')
                 self._handle_gpu_check_failure(e)
                 return
@@ -239,7 +240,7 @@ class BaseTrainer:
             t.cuda.empty_cache()
         except RuntimeError as e:
             err_str = str(e).lower()
-            if 'hip' in err_str or 'illegal' in err_str or 'cuda' in err_str or 'aperture' in err_str:
+            if is_hip_error(err_str) or is_cuda_error(err_str):
                 print(f'[GPU-CHECK] GPU sanity check FAILED (matmul): {e}')
                 self._handle_gpu_check_failure(e)
                 return

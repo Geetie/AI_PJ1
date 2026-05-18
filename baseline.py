@@ -13,7 +13,9 @@ from inference.predict import predicts, ctc_predict
 set_seed(42)
 
 import torch as t
-if t.cuda.is_available():
+from utils.platform import is_nvidia_cuda, get_precision_config
+
+if is_nvidia_cuda():
     try:
         t.set_float32_matmul_precision('high')
         print('TF32 matmul precision enabled')
@@ -21,7 +23,6 @@ if t.cuda.is_available():
         print('TF32 matmul precision not supported on this GPU')
     try:
         t.backends.cudnn.allow_tf32 = True
-        t.backends.cuda.matmul.allow_tf32 = True
     except Exception:
         pass
 
