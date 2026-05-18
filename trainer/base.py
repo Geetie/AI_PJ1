@@ -379,10 +379,11 @@ class BaseTrainer:
                     self._pending_save = False
 
     def save_model(self, save_path, save_opt=False, save_config=False):
+        raw_model = self._get_raw_model()
         if self.ema is not None:
             dicts = {'model': self.ema.ema.state_dict()}
         else:
-            dicts = {'model': self.model.state_dict()}
+            dicts = {'model': raw_model.state_dict()}
         dicts['model_type'] = self._model_type
         dicts['epoch'] = self._current_epoch + 1
         dicts['best_acc'] = self.best_acc
@@ -397,10 +398,16 @@ class BaseTrainer:
         dicts['train_log'] = self.train_log
         t.save(dicts, save_path)
 
+    def _get_raw_model(self):
+        if hasattr(self.model, '_orig_mod'):
+            return self.model._orig_mod
+        return self.model
+
     def load_model(self, load_path, skip_load_weights=False, save_opt=False, save_config=False):
         dicts = t.load(load_path, map_location=self.device, weights_only=False)
+        raw_model = self._get_raw_model()
         if not skip_load_weights:
-            self.model.load_state_dict(dicts['model'])
+            raw_model.load_state_dict(dicts['model'])
             if self.ema is not None:
                 self.ema.ema.load_state_dict(dicts['model'])
         if 'epoch' in dicts:
@@ -427,14 +434,11 @@ class BaseTrainer:
             for k, v in dicts['config'].items():
                 config.__setattr__(k, v)
         if not save_opt and config.start_epoch > 0:
-            if hasattr(self.optimizer, '_step_count') and self.optimizer._step_count > 0:
-                for _ in range(config.start_epoch):
-                    self.lr_scheduler.step()
-            else:
-                self.logger.logger.warning(
-                    f'[LOAD] Skipping lr_scheduler.step() - optimizer not initialized yet. '
-                    f'Training will continue with initial LR.'
-                )
+            for _ in range(config.start_epoch):
+                self.lr_scheduler.step()
+            self.logger.logger.info(
+                f'[LOAD] Advanced lr_scheduler to epoch {config.start_epoch}, '
+                f'lr={self.optimizer.param_groups[0]["lr"]:.8f}')
 
     def _check_early_stopping(self, acc, epoch):
         if acc > self.best_acc:

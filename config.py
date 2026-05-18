@@ -158,7 +158,7 @@ class AMDLargeProfile(GPUProfile):
     resize_size = 448
     fc_hidden = 1536
     grad_accum_steps = 1
-    use_torch_compile = True
+    use_torch_compile = False
     compile_mode = 'default'
     use_gradient_checkpoint = False
     oom_headroom_ratio = 0.10

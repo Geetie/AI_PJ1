@@ -58,6 +58,10 @@ class MultiHeadTrainer(BaseTrainer):
             self.val_loader = None
 
         self.model = create_model(self._model_type).to(self.device)
+
+        backbone_params = list(self.model.backbone.parameters())
+        other_params = [p for n, p in self.model.named_parameters() if not n.startswith('backbone.')]
+
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
         if config.use_torch_compile and t.cuda.is_available():
             try:
@@ -75,8 +79,6 @@ class MultiHeadTrainer(BaseTrainer):
         for h in range(config.num_heads):
             self.head_criteria.append(LabelSmoothEntropy(smooth=config.smooth, class_weights=class_weights))
 
-        backbone_params = list(self.model.backbone.parameters())
-        other_params = [p for n, p in self.model.named_parameters() if not n.startswith('backbone.')]
         self.optimizer = self._setup_optimizer(backbone_params, other_params)
         self.lr_scheduler = self._setup_scheduler()
         self.scaler = self._setup_scaler()
@@ -88,9 +90,7 @@ class MultiHeadTrainer(BaseTrainer):
             self.load_model(config.pretrained, save_opt=False)
             print(f'Load model from {config.pretrained}')
             print('Warning: Optimizer and scheduler NOT restored. Using new config.')
-            if 'best_acc' in t.load(config.pretrained, map_location='cpu', weights_only=False):
-                self.best_acc = t.load(config.pretrained, map_location='cpu', weights_only=False)['best_acc']
-                print(f'Restored best_acc: {self.best_acc * 100:.2f}%')
+            print(f'Restored best_acc: {self.best_acc * 100:.2f}%')
 
     def _compute_class_weights(self):
         class_counts = t.zeros(config.class_num)
