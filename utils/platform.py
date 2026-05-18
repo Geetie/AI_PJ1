@@ -290,7 +290,7 @@ def get_recommended_batch_size():
     elif GPU_PLATFORM == 'nvidia_cuda':
         if TOTAL_VRAM_GB >= 40:
             return 128
-        elif TOTAL_VRAM_GB >= 24:
+        elif TOTAL_VRAM_GB >= 22:
             return 64
         elif TOTAL_VRAM_GB >= 16:
             return 32

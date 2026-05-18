@@ -445,7 +445,7 @@ def _detect_gpu_profile():
             profile.eval_batch_size = 160
             profile.num_workers = min(max(NUM_PHYSICAL_CORES - 2, 4), 12)
             profile.prefetch_factor = 2
-        elif TOTAL_VRAM_GB >= 24:
+        elif TOTAL_VRAM_GB >= 22:
             profile = A100Profile()
         elif TOTAL_VRAM_GB >= 16:
             profile = GPUProfile()
