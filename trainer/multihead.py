@@ -145,7 +145,7 @@ class MultiHeadTrainer(BaseTrainer):
             if (i + 1) % config.grad_accum_steps == 1:
                 self.optimizer.zero_grad()
 
-            with autocast('cuda', enabled=self.use_amp):
+            with autocast(self.device.type, enabled=self.use_amp):
                 pred, pred_bboxes, attn_maps, head_cls_outs = self.model.forward_with_attn(img, gt_bboxes=bbox_target)
 
                 true_lengths = bbox_mask.sum(dim=1).long()

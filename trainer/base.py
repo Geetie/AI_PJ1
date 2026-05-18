@@ -123,7 +123,9 @@ class TrainingLogger:
 
 
 class ModelEMA:
-    def __init__(self, model, decay=0.999, device='cuda'):
+    def __init__(self, model, decay=0.999, device=None):
+        if device is None:
+            device = 'cuda' if t.cuda.is_available() else 'cpu'
         self.device = device
         self.ema = copy.deepcopy(model).to(device)
         self.ema.eval()
@@ -194,7 +196,7 @@ class BaseTrainer:
                             milestones=[config.warmup_epochs])
 
     def _setup_scaler(self):
-        return GradScaler('cuda', enabled=self.use_amp)
+        return GradScaler(self.device.type, enabled=self.use_amp)
 
     def _pre_epoch_hook(self, epoch):
         pass

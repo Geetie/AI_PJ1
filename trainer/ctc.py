@@ -78,7 +78,7 @@ class CTCTrainer(BaseTrainer):
             label_concat = label_concat.to(self.device)
             self.optimizer.zero_grad()
 
-            with autocast('cuda', enabled=self.use_amp):
+            with autocast(self.device.type, enabled=self.use_amp):
                 log_probs = self.model(img)
                 T = log_probs.size(0)
                 B = log_probs.size(1)
