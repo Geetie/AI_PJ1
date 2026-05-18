@@ -13,6 +13,8 @@ os.environ.setdefault('MIOPEN_DISABLE_CACHE', '0')
 os.environ.setdefault('MIOPEN_FIND_MODE', '2')
 os.environ.setdefault('MIOPEN_USER_DB_PATH', os.path.join(BASE_DIR, 'miopen_cache'))
 os.environ.setdefault('TRITON_CACHE_DIR', os.path.join(BASE_DIR, 'triton_cache'))
+os.environ.setdefault('TORCHINDUCTOR_CACHE_DIR', os.path.join(BASE_DIR, 'inductor_cache'))
+os.environ.setdefault('HSA_OVERRIDE_GFX_VERSION', '9.0.0')
 
 
 def _is_triton_available():
@@ -181,30 +183,31 @@ class A100Profile(GPUProfile):
 
 
 class AMDLargeProfile(GPUProfile):
-    batch_size = 256
-    eval_batch_size = 384
-    num_workers = 8
-    prefetch_factor = 2
+    batch_size = 128
+    eval_batch_size = 192
+    num_workers = 16
+    prefetch_factor = 4
     persistent_workers = True
     multiprocessing_context = 'fork'
     input_height = 416
     input_width = 416
     resize_size = 448
     fc_hidden = 1536
-    grad_accum_steps = 1
+    grad_accum_steps = 2
     use_torch_compile = True
     compile_mode = 'default'
+    compile_dynamic = True
     use_gradient_checkpoint = False
     oom_headroom_ratio = 0.10
     max_checkpoints = 3
-    pin_memory = True
+    pin_memory = False
     tta_sizes = [320, 352, 384, 416, 448]
-    lr = 5e-3
+    lr = 4e-3
     backbone_lr_factor = 0.1
     warmup_epochs = 8
-    dropout = 0.2
-    ema_decay = 0.999
-    aux_loss_weight = 0.3
+    dropout = 0.15
+    ema_decay = 0.9995
+    aux_loss_weight = 0.4
     bbox_loss_weight = 5.0
     attn_diversity_weight = 0.1
     attn_supervision_weight = 2.0
@@ -219,7 +222,7 @@ class AMDLargeProfile(GPUProfile):
     num_attn_channels = 8
     cutmix_alpha = 1.0
     cutmix_prob = 0.5
-    erase_prob = 0.2
+    erase_prob = 0.15
     smooth = 0.1
     aug_rotation_degrees = 10
     aug_blur_prob = 0.15
@@ -234,13 +237,15 @@ def _detect_gpu_profile():
             profile = AMDLargeProfile()
         elif TOTAL_VRAM_GB >= 48:
             profile = GPUProfile()
-            profile.batch_size = 128
-            profile.eval_batch_size = 192
-            profile.num_workers = min(max(NUM_PHYSICAL_CORES - 4, 4), 12)
+            profile.batch_size = 96
+            profile.eval_batch_size = 128
+            profile.num_workers = min(max(NUM_PHYSICAL_CORES - 4, 8), 16)
             profile.prefetch_factor = 3
             profile.pin_memory = False
             profile.use_torch_compile = True
             profile.compile_mode = 'default'
+            profile.compile_dynamic = True
+            profile.grad_accum_steps = 2
         else:
             profile = GPUProfile()
             profile.batch_size = 64
@@ -272,6 +277,16 @@ def _detect_gpu_profile():
             profile.num_workers = min(max(NUM_PHYSICAL_CORES - 1, 2), 4)
         else:
             return CPUProfile()
+
+    if profile.multiprocessing_context == 'fork' and GPU_PLATFORM == 'amd_rocm':
+        try:
+            import torch as _t
+            if _t.cuda.is_initialized():
+                print('[CONFIG] Warning: CUDA already initialized before fork, '
+                      'switching to forkserver to avoid potential deadlocks')
+                profile.multiprocessing_context = 'forkserver'
+        except Exception:
+            pass
 
     if profile.use_torch_compile and not COMPILE_AVAILABLE:
         print(f'[COMPILE] torch.compile not available on this platform '
@@ -370,7 +385,9 @@ def _check_shm_and_adjust():
                     config.prefetch_factor = None
                     config.multiprocessing_context = None
     except Exception:
-        pass
+        if sys.platform == 'win32' and config.num_workers > 0:
+            print('[SHM] /dev/shm check skipped on Windows. If DataLoader shared memory '
+                  'errors occur, try reducing num_workers.')
 
 
 _check_shm_and_adjust()

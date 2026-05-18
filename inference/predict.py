@@ -232,6 +232,11 @@ def cross_model_ensemble(multihead_path, ctc_path, csv_path, model_type=None):
             mh_img = mh_img.to(device)
             ctc_img = ctc_img.to(device)
             bs = mh_img.size(0)
+            if bs != ctc_img.size(0):
+                print(f'[ENSEMBLE] Warning: batch size mismatch mh={bs} ctc={ctc_img.size(0)}, using min')
+                bs = min(bs, ctc_img.size(0))
+                mh_img = mh_img[:bs]
+                ctc_img = ctc_img[:bs]
 
             mh_probs = mh_model.forward_with_probs(mh_img)
             mh_preds = [p.argmax(1) for p in mh_probs]
@@ -268,14 +273,21 @@ def cross_model_ensemble(multihead_path, ctc_path, csv_path, model_type=None):
                     ctc_digits = [(char_list[d], ctc_confidences[b][i] if i < len(ctc_confidences[b]) else 0.0)
                                   for i, d in enumerate(ctc_preds[b])]
 
+                    mh_max_conf = max((c for _, c in mh_digits), default=1.0)
+                    ctc_max_conf = max((c for _, c in ctc_digits), default=1.0)
+                    mh_max_conf = max(mh_max_conf, 1e-6)
+                    ctc_max_conf = max(ctc_max_conf, 1e-6)
+
                     max_len = max(len(mh_digits), len(ctc_digits))
                     final_chars = []
                     for pos in range(max_len):
                         mh_c, mh_conf = mh_digits[pos] if pos < len(mh_digits) else ('', 0.0)
                         ctc_c, ctc_conf = ctc_digits[pos] if pos < len(ctc_digits) else ('', 0.0)
+                        norm_mh = mh_conf / mh_max_conf
+                        norm_ctc = ctc_conf / ctc_max_conf
                         if mh_c == ctc_c:
                             final_chars.append(mh_c)
-                        elif mh_conf >= ctc_conf:
+                        elif norm_mh >= norm_ctc:
                             final_chars.append(mh_c)
                         else:
                             final_chars.append(ctc_c)

@@ -83,7 +83,8 @@ class FPNBackbone(nn.Module):
         return c1, c2, c3
 
     def forward(self, x):
-        if self.training and self.use_checkpoint:
+        use_ckpt = self.training and self.use_checkpoint and not config.use_torch_compile
+        if use_ckpt:
             c1, c2, c3 = t.utils.checkpoint.checkpoint(self._forward_early, x, use_reentrant=False)
         else:
             c1, c2, c3 = self._forward_early(x)

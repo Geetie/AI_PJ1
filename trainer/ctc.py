@@ -203,7 +203,9 @@ class CTCTrainer(BaseTrainer):
         for i, (img, label_concat, lengths) in enumerate(tbar):
             img = img.to(self.device)
             label_concat = label_concat.to(self.device)
-            self.optimizer.zero_grad()
+
+            if (i + 1) % config.grad_accum_steps == 1:
+                self.optimizer.zero_grad()
 
             with autocast(self.device.type, enabled=self.use_amp):
                 log_probs = self.model(img)
@@ -212,13 +214,17 @@ class CTCTrainer(BaseTrainer):
                 input_lengths = t.full((B,), T, dtype=t.long)
                 target_lengths = lengths.to(self.device)
                 loss = self.criterion(log_probs, label_concat, input_lengths, target_lengths)
+                loss = loss / config.grad_accum_steps
 
             self.scaler.scale(loss).backward()
-            self.scaler.unscale_(self.optimizer)
-            t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-            self.ema.update(self.model)
+
+            if (i + 1) % config.grad_accum_steps == 0 or (i + 1) == len(tbar):
+                self.scaler.unscale_(self.optimizer)
+                t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                self.ema.update(self.model)
+
             total_loss += loss.item()
             batch_time = time.time() - batch_start
             batch_start = time.time()
@@ -244,7 +250,10 @@ class CTCTrainer(BaseTrainer):
         return corrects * 100 / max(total, 1)
 
     def _eval(self):
-        model = self.ema.ema if self.ema is not None else self.model
+        if self.ema is not None:
+            model = self.ema.to_device(self.device)
+        else:
+            model = self._get_raw_model()
         model.eval()
         eval_bs = config.eval_batch_size
         max_retries = 3

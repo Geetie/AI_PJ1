@@ -139,6 +139,7 @@ class MultiHeadTrainer(BaseTrainer):
                 config.prefetch_factor = None
                 config.persistent_workers = False
                 config.multiprocessing_context = None
+                self._original_num_workers = config.num_workers
                 self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
                                                       shuffle=True, drop_last=True)
                 if self.val_loader is not None:
@@ -233,6 +234,9 @@ class MultiHeadTrainer(BaseTrainer):
                     f'[WARMUP] torch.compile failed, falling back to eager: {e}')
                 config.use_torch_compile = False
                 self.model = self._get_raw_model()
+                if self.ema is not None:
+                    from utils.compile_utils import get_raw_model as _grm
+                    self.ema = ModelEMA(_grm(self.model), decay=config.ema_decay)
                 t.cuda.empty_cache()
                 try:
                     dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
@@ -260,6 +264,11 @@ class MultiHeadTrainer(BaseTrainer):
                     self.ema.ema.load_state_dict(saved_state)
                 del saved_state
                 t.cuda.empty_cache()
+                if config.use_torch_compile:
+                    try:
+                        t._dynamo.reset()
+                    except Exception:
+                        pass
                 print(f'[WARMUP] Model weights restored after warmup')
             except Exception:
                 del saved_state
@@ -310,13 +319,15 @@ class MultiHeadTrainer(BaseTrainer):
             for _ in range(config.num_heads - len(digits)):
                 class_counts[10] += 1
         class_weights = 1.0 / (class_counts + 1e-6)
-        class_weights = class_weights * config.class_num / class_weights.sum()
+        class_weights[10] = 0.0
+        active = class_weights[:10]
+        class_weights[:10] = active * config.class_num / active.sum()
         class_weights = class_weights.to(self.device)
         print(f'Computed class weights from JSON: {class_weights.cpu().numpy()}')
-        print(f'   Class 10 (empty) weight: {class_weights[10].item():.3f}')
+        print(f'   Class 10 (empty) weight: {class_weights[10].item():.3f} (excluded from loss)')
         return class_weights
 
-    def _make_loader(self, dataset, batch_size, shuffle=False, drop_last=False):
+    def _make_loader(self, dataset, batch_size, shuffle=False, drop_last=False, collate_fn=None):
         kwargs = dict(
             batch_size=batch_size, shuffle=shuffle,
             num_workers=config.num_workers, pin_memory=config.pin_memory,
@@ -327,6 +338,8 @@ class MultiHeadTrainer(BaseTrainer):
             kwargs['persistent_workers'] = config.persistent_workers
         if config.multiprocessing_context is not None and config.num_workers > 0:
             kwargs['multiprocessing_context'] = config.multiprocessing_context
+        if collate_fn is not None:
+            kwargs['collate_fn'] = collate_fn
         print(f'[DataLoader] batch={batch_size}, workers={config.num_workers}, '
               f'pin_mem={config.pin_memory}, ctx={config.multiprocessing_context}, '
               f'persistent={config.persistent_workers}, dataset={len(dataset)}')

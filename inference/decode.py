@@ -51,16 +51,14 @@ def ctc_beam_decode(log_probs, beam_width=10):
     log_probs = log_probs.permute(1, 0, 2)
     B, T, C = log_probs.shape
     blank = 10
-    results = []
+    results = [[] for _ in range(B)]
     for b in range(B):
-        beam_b = {}
-        beam_nb = {}
-        beam_b[((),)] = 0.0
-        beam_nb[((),)] = -float('inf')
-        for t in range(T):
+        beam_b = {(): 0.0}
+        beam_nb = {(): -float('inf')}
+        for t_step in range(T):
             new_beam_b = {}
             new_beam_nb = {}
-            topk_vals, topk_idx = log_probs[b, t].topk(min(beam_width, C))
+            topk_vals, topk_idx = log_probs[b, t_step].topk(min(beam_width, C))
             for k in range(topk_idx.size(0)):
                 c = topk_idx[k].item()
                 log_p = topk_vals[k].item()
@@ -120,7 +118,5 @@ def ctc_beam_decode(log_probs, beam_width=10):
             all_final[p] = np.logaddexp(all_final[p], s)
         if all_final:
             best = max(all_final, key=all_final.get)
-            results.append(list(best))
-        else:
-            results.append([])
+            results[b] = list(best)
     return results

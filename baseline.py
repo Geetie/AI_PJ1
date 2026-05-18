@@ -19,6 +19,11 @@ if t.cuda.is_available():
         print('TF32 matmul precision enabled')
     except Exception:
         print('TF32 matmul precision not supported on this GPU')
+    try:
+        t.backends.cudnn.allow_tf32 = True
+        t.backends.cuda.matmul.allow_tf32 = True
+    except Exception:
+        pass
 
 
 if __name__ == '__main__':

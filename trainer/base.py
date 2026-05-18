@@ -150,6 +150,8 @@ class ModelEMA:
         with t.no_grad():
             for ema_p, model_p in zip(self.ema.parameters(), model.parameters()):
                 ema_p.data.mul_(self.decay).add_(model_p.data.to(self.device), alpha=1 - self.decay)
+            for ema_b, model_b in zip(self.ema.buffers(), model.buffers()):
+                ema_b.data.copy_(model_b.data.to(self.device))
 
     def to_device(self, device=None):
         target_device = device or self.device
@@ -161,7 +163,9 @@ class ModelEMA:
     def __getattr__(self, name):
         if name in self.__dict__:
             return self.__dict__[name]
-        return getattr(self.ema, name)
+        if name in ('training', 'num_heads'):
+            return getattr(self.ema, name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 
 class BaseTrainer:
@@ -276,7 +280,7 @@ class BaseTrainer:
                         config.batch_size = max(int(config.batch_size * safe_ratio), 16)
                     else:
                         config.batch_size = max(int(config.batch_size * 0.75), 16)
-                    config.grad_accum_steps = max(self._original_batch_size // config.batch_size, 1)
+                    config.grad_accum_steps = max(-(-self._original_batch_size // config.batch_size), 1)
                     self._stable_batch_size = None
                     self.logger.logger.warning(
                         f'[OOM] Reducing batch_size {old_bs} -> {config.batch_size}, '
@@ -286,6 +290,7 @@ class BaseTrainer:
                     t.cuda.reset_peak_memory_stats()
                     self._cleanup_dataloader(self.train_loader)
                     self._rebuild_dataloaders()
+                    self.lr_scheduler.step()
                     continue
                 elif 'shared memory' in err_msg and config.num_workers > 0:
                     config.num_workers = max(config.num_workers // 2, 0)
@@ -295,6 +300,7 @@ class BaseTrainer:
                         f'prefetch_factor to {config.prefetch_factor}')
                     self._cleanup_dataloader(self.train_loader)
                     self._rebuild_dataloaders()
+                    self.lr_scheduler.step()
                     continue
                 else:
                     raise
@@ -392,7 +398,7 @@ class BaseTrainer:
     def save_model(self, save_path, save_opt=False, save_config=False):
         raw_model = self._get_raw_model()
         if self.ema is not None:
-            dicts = {'model': self.ema.ema.state_dict()}
+            dicts = {'model': self.ema.ema.state_dict(), 'train_model': raw_model.state_dict()}
         else:
             dicts = {'model': raw_model.state_dict()}
         dicts['model_type'] = self._model_type
@@ -454,10 +460,22 @@ class BaseTrainer:
             for k, v in dicts['config'].items():
                 config.__setattr__(k, v)
         if not save_opt and config.start_epoch > 0:
-            for _ in range(config.start_epoch):
-                self.lr_scheduler.step()
+            if 'lr_scheduler' in dicts:
+                try:
+                    self.lr_scheduler.load_state_dict(dicts['lr_scheduler'])
+                    self.logger.logger.info(
+                        f'[LOAD] Restored lr_scheduler state from checkpoint')
+                except Exception as e:
+                    self.logger.logger.warning(
+                        f'[LOAD] Failed to restore lr_scheduler state: {e}, '
+                        f'falling back to step-based advance')
+                    for _ in range(config.start_epoch):
+                        self.lr_scheduler.step()
+            else:
+                for _ in range(config.start_epoch):
+                    self.lr_scheduler.step()
             self.logger.logger.info(
-                f'[LOAD] Advanced lr_scheduler to epoch {config.start_epoch}, '
+                f'[LOAD] lr_scheduler at epoch {config.start_epoch}, '
                 f'lr={self.optimizer.param_groups[0]["lr"]:.8f}')
 
     def _check_early_stopping(self, acc, epoch):

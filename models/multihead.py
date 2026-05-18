@@ -194,7 +194,7 @@ class DigitsResnet101(nn.Module):
         except RuntimeError:
             self.has_roi = False
             return t.zeros(B, config.class_num, device=feat.device)
-        if self.training and config.use_gradient_checkpoint:
+        if self.training and config.use_gradient_checkpoint and not config.use_torch_compile:
             roi_processed = t.utils.checkpoint.checkpoint(self.roi_cnn[head_idx], roi_feat, use_reentrant=False)
         else:
             roi_processed = self.roi_cnn[head_idx](roi_feat)
@@ -221,8 +221,9 @@ class DigitsResnet101(nn.Module):
         feat = self.backbone(img)
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         results = []
+        use_ckpt = self.training and config.use_gradient_checkpoint and not config.use_torch_compile
         for head in self.heads:
-            if self.training and config.use_gradient_checkpoint:
+            if use_ckpt:
                 results.append(t.utils.checkpoint.checkpoint(head, feat, False, use_reentrant=False))
             else:
                 results.append(head(feat))
@@ -238,13 +239,14 @@ class DigitsResnet101(nn.Module):
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         head_cls_outs, bbox_outs, attn_maps = [], [], []
         head_feats = []
+        use_ckpt = self.training and config.use_gradient_checkpoint and not config.use_torch_compile
         for head in self.heads:
-            if self.training and config.use_gradient_checkpoint:
+            if use_ckpt:
                 cls_out, bbox_out, hidden, attn = t.utils.checkpoint.checkpoint(
                     head, feat, True, use_reentrant=False)
             else:
                 cls_out, bbox_out, hidden, attn = head(feat, return_attn=True)
-            head_cls_outs.append(cls_out.detach() if self.training else cls_out)
+            head_cls_outs.append(cls_out)
             bbox_outs.append(bbox_out)
             head_feats.append(hidden)
             attn_maps.append(attn.detach() if self.training else attn)
