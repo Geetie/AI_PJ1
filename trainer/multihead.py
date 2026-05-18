@@ -92,6 +92,24 @@ class MultiHeadTrainer(BaseTrainer):
             print('Warning: Optimizer and scheduler NOT restored. Using new config.')
             print(f'Restored best_acc: {self.best_acc * 100:.2f}%')
 
+        self._gpu_warmup()
+
+    def _gpu_warmup(self):
+        print('[WARMUP] Starting GPU warmup (MIOpen kernel compilation)...')
+        warmup_start = time.time()
+        try:
+            dummy = t.randn(2, 3, config.input_height, config.input_width, device=self.device)
+            with t.no_grad():
+                _ = self.model(dummy)
+            t.cuda.synchronize()
+            del dummy
+            t.cuda.empty_cache()
+            warmup_time = time.time() - warmup_start
+            print(f'[WARMUP] GPU warmup completed in {warmup_time:.1f}s')
+        except Exception as e:
+            print(f'[WARMUP] GPU warmup failed: {e}')
+            t.cuda.empty_cache()
+
     def _compute_class_weights(self):
         class_counts = t.zeros(config.class_num)
         with open(data_dir['train_label'], 'r') as f:
@@ -164,12 +182,18 @@ class MultiHeadTrainer(BaseTrainer):
         batch_start = time.time()
         tbar = tqdm(self.train_loader)
         self.model.train()
+        first_batch = True
 
         for i, (img, label, bbox_target, bbox_mask) in enumerate(tbar):
+            t0 = time.time()
             img = img.to(self.device)
             label = label.to(self.device)
             bbox_target = bbox_target.to(self.device)
             bbox_mask = bbox_mask.to(self.device)
+            if first_batch:
+                print(f'[BATCH0] data->gpu: {time.time()-t0:.2f}s, img={img.shape}')
+
+            t1 = time.time()
 
             if config.cutmix_prob > 0 and random.random() < config.cutmix_prob and config.cutmix_alpha > 0:
                 img, label_a, label_b, bbox_a, bbox_b, mask_a, mask_b, lam = cutmix_data(
@@ -190,6 +214,9 @@ class MultiHeadTrainer(BaseTrainer):
 
             with autocast(self.device.type, enabled=self.use_amp):
                 pred, pred_bboxes, attn_maps, head_cls_outs = self.model.forward_with_attn(img, gt_bboxes=bbox_target)
+                if first_batch:
+                    t.cuda.synchronize()
+                    print(f'[BATCH0] forward: {time.time()-t1:.2f}s')
 
                 true_lengths = bbox_mask.sum(dim=1).long()
 
@@ -254,6 +281,10 @@ class MultiHeadTrainer(BaseTrainer):
                 self.scaler.update()
                 self.optimizer.zero_grad()
                 self.ema.update(self.model)
+            if first_batch:
+                t.cuda.synchronize()
+                print(f'[BATCH0] forward+backward+step: {time.time()-t1:.2f}s, loss={loss.item():.4f}')
+                first_batch = False
             total_loss += loss.item()
             batch_time = time.time() - batch_start
             batch_start = time.time()
