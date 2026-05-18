@@ -497,7 +497,10 @@ class MultiHeadTrainer(BaseTrainer):
 
             if (i + 1) % config.grad_accum_steps == 0 or (i + 1) == len(tbar):
                 self.scaler.unscale_(self.optimizer)
-                t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+                if hasattr(config, 'grad_clip_max_norm'):
+                    t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=config.grad_clip_max_norm)
+                else:
+                    t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 self.optimizer.zero_grad()

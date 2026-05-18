@@ -50,18 +50,18 @@ def resize_keep_aspect(img, bboxes, target_size):
 
 
 def apply_augmentation(img):
-    img = transforms.ColorJitter(0.3, 0.3, 0.3, 0.1)(img)
+    img = transforms.ColorJitter(0.1, 0.1, 0.1, 0.05)(img)
     img = transforms.RandomGrayscale(0.1)(img)
     if config.aug_rotation_degrees > 0:
         img = transforms.RandomRotation(config.aug_rotation_degrees, fill=127)(img)
     if config.aug_blur_prob > 0 and random.random() < config.aug_blur_prob:
         img = transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0))(img)
-    if random.random() < 0.3:
-        img = _random_perspective_or_affine(distortion_scale=0.3, fill=127)(img)
     if random.random() < 0.2:
-        img = transforms.RandomAdjustSharpness(sharpness_factor=2, p=0.5)(img)
-    if random.random() < 0.15:
-        img = transforms.RandomAutocontrast(p=0.5)(img)
+        img = _random_perspective_or_affine(distortion_scale=0.2, fill=127)(img)
+    if random.random() < 0.3:
+        img = transforms.RandomAdjustSharpness(sharpness_factor=2, p=0.7)(img)
+    if random.random() < 0.2:
+        img = transforms.RandomAutocontrast(p=0.6)(img)
     return img
 
 
