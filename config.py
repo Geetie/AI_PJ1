@@ -251,7 +251,7 @@ class A100Profile(GPUProfile):
     max_checkpoints = 3
     pin_memory = True
     tta_sizes = [384, 416]
-    lr = 3e-3
+    lr = 1e-3
     backbone_lr_factor = 0.1
     warmup_epochs = 5
     dropout = 0.2
