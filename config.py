@@ -9,6 +9,7 @@ BASE_DIR = '/mnt/workspace' if os.path.exists('/mnt/workspace') else SCRIPT_DIR
 IS_MODELSCOPE = os.path.exists('/mnt/workspace')
 
 os.environ.setdefault('MIOPEN_DISABLE_CACHE', '0')
+os.environ.setdefault('MIOPEN_FIND_MODE', '2')
 os.environ.setdefault('MIOPEN_USER_DB_PATH', os.path.join(BASE_DIR, 'miopen_cache'))
 
 

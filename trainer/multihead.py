@@ -1,8 +1,10 @@
 import os
+import copy
 import gc
 import json
 import random
 import time
+import threading
 import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
@@ -124,32 +126,92 @@ class MultiHeadTrainer(BaseTrainer):
                                                         shuffle=False, drop_last=False)
 
     def _gpu_warmup(self):
-        print('[WARMUP] Starting GPU warmup (MIOpen kernel compilation)...')
-        warmup_start = time.time()
+        warmup_bs = config.batch_size
+        print(f'[WARMUP] Starting GPU warmup with bs={warmup_bs}...')
+        print(f'[WARMUP] MIOpen kernel compilation in progress (may take 3-10 min on first run)')
+        print(f'[WARMUP] Subsequent runs will use cached kernels and be much faster')
+
+        saved_state = None
         try:
-            warmup_bs = min(config.batch_size, 32)
+            saved_state = copy.deepcopy(self.model.state_dict())
+        except Exception:
+            saved_state = None
+
+        heartbeat_stop = threading.Event()
+        warmup_start = time.time()
+
+        def _heartbeat():
+            elapsed = 0
+            while not heartbeat_stop.wait(30):
+                elapsed += 30
+                print(f'[WARMUP] Still compiling MIOpen kernels... ({elapsed}s elapsed, this is normal on first run)')
+
+        ht = threading.Thread(target=_heartbeat, daemon=True)
+        ht.start()
+
+        try:
             dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
             dummy_label = t.randint(0, config.class_num, (warmup_bs, config.num_heads), device=self.device)
             dummy_bbox = t.rand(warmup_bs, config.num_heads, 4, device=self.device)
             dummy_mask = t.ones(warmup_bs, config.num_heads, device=self.device)
             for i in range(config.num_heads):
                 dummy_mask[:, i] = (t.rand(warmup_bs) > 0.3).float()
+
+            print(f'[WARMUP] Running forward pass (bs={warmup_bs})...')
             with autocast(self.device.type, enabled=self.use_amp):
                 pred, pred_bboxes, attn_maps, head_cls_outs = self.model.forward_with_attn(dummy, gt_bboxes=dummy_bbox)
                 cls_loss = sum(self.head_criteria[h](pred[h], dummy_label[:, h]) for h in range(config.num_heads))
                 loss = cls_loss / config.grad_accum_steps
+
+            print(f'[WARMUP] Forward done, running backward pass...')
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()
             self.optimizer.zero_grad()
             t.cuda.synchronize()
+
             del dummy, dummy_label, dummy_bbox, dummy_mask, pred, pred_bboxes, attn_maps, head_cls_outs, loss
             t.cuda.empty_cache()
+
             warmup_time = time.time() - warmup_start
             print(f'[WARMUP] GPU warmup completed in {warmup_time:.1f}s (forward+backward with bs={warmup_bs})')
+        except RuntimeError as e:
+            if 'out of memory' in str(e).lower():
+                print(f'[WARMUP] OOM with bs={warmup_bs}, trying bs={warmup_bs // 4}...')
+                t.cuda.empty_cache()
+                try:
+                    warmup_bs = warmup_bs // 4
+                    dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
+                    dummy_label = t.randint(0, config.class_num, (warmup_bs, config.num_heads), device=self.device)
+                    dummy_bbox = t.rand(warmup_bs, config.num_heads, 4, device=self.device)
+                    with t.no_grad():
+                        _ = self.model(dummy)
+                    t.cuda.synchronize()
+                    del dummy, dummy_label, dummy_bbox
+                    t.cuda.empty_cache()
+                    warmup_time = time.time() - warmup_start
+                    print(f'[WARMUP] Fallback warmup completed in {warmup_time:.1f}s (inference only with bs={warmup_bs})')
+                except Exception as e2:
+                    print(f'[WARMUP] Fallback warmup also failed: {e2}')
+                    t.cuda.empty_cache()
+            else:
+                print(f'[WARMUP] GPU warmup failed: {e}')
+                t.cuda.empty_cache()
         except Exception as e:
             print(f'[WARMUP] GPU warmup failed: {e}')
             t.cuda.empty_cache()
+        finally:
+            heartbeat_stop.set()
+            ht.join(timeout=5)
+
+        if saved_state is not None:
+            try:
+                self.model.load_state_dict(saved_state)
+                del saved_state
+                t.cuda.empty_cache()
+                print(f'[WARMUP] Model weights restored after warmup')
+            except Exception:
+                del saved_state
 
     def _compute_class_weights(self):
         class_counts = t.zeros(config.class_num)
