@@ -171,7 +171,8 @@ class BaseTrainer:
         self._min_stable_epochs_for_recovery = 3
         self._pending_save = False
         
-        signal.signal(signal.SIGUSR1, self._handle_save_signal)
+        if hasattr(signal, 'SIGUSR1'):
+            signal.signal(signal.SIGUSR1, self._handle_save_signal)
 
     def _handle_save_signal(self, signum, frame):
         print(f"\n[EMERGENCY] Received SIGUSR1 signal, will save checkpoint after current batch...")
@@ -350,6 +351,7 @@ class BaseTrainer:
                 self.logger.logger.warning(
                     f'[LOAD] Skipping lr_scheduler.step() - optimizer not initialized yet. '
                     f'Training will continue with initial LR.'
+                )
 
     def _check_early_stopping(self, acc, epoch):
         if acc > self.best_acc:
