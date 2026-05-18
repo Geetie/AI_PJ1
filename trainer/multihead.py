@@ -136,7 +136,7 @@ class MultiHeadTrainer(BaseTrainer):
                 self.patience_counter = ckpt['patience_counter']
             self.logger.logger.info(f'Restored best_acc: {self.best_acc * 100:.2f}%, '
                                    f'start_epoch: {config.start_epoch}, '
-                                   f'patience: {self.patience_counter}/{config.patience}')
+                                   f'patience: {self.patience_counter}/{config.early_stopping_patience}')
 
         self._gpu_warmup()
 
