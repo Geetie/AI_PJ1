@@ -8,32 +8,88 @@ BASE_DIR = '/mnt/workspace' if os.path.exists('/mnt/workspace') else SCRIPT_DIR
 
 IS_MODELSCOPE = os.path.exists('/mnt/workspace')
 
-NUM_WORKERS = min(max(multiprocessing.cpu_count() - 2, 2), 8) if IS_MODELSCOPE else (min(multiprocessing.cpu_count() - 1, 8) if os.name != 'nt' else 0)
 
-NUM_HEADS = 6
+def _detect_gpu_platform():
+    """Detect GPU platform: NVIDIA CUDA or AMD ROCm"""
+    if not t.cuda.is_available():
+        return 'cpu'
+    
+    try:
+        props = t.cuda.get_device_properties(0)
+        gpu_name = props.name.lower()
+        if 'amd' in gpu_name or 'radeon' in gpu_name:
+            return 'amd_rocm'
+        else:
+            return 'nvidia_cuda'
+    except Exception:
+        return 'nvidia_cuda'
+
+
+def _get_total_vram_gb():
+    """Get total VRAM in GB"""
+    if not t.cuda.is_available():
+        return 0
+    try:
+        props = t.cuda.get_device_properties(0)
+        return getattr(props, 'total_mem', getattr(props, 'total_memory', 0)) / (1024 ** 3)
+    except Exception:
+        return 0
+
+
+GPU_PLATFORM = _detect_gpu_platform()
+TOTAL_VRAM_GB = _get_total_vram_gb()
+NUM_PHYSICAL_CORES = multiprocessing.cpu_count() or 2
 
 
 def _auto_batch_size():
+    """Automatically determine batch size based on GPU platform and VRAM"""
     if not t.cuda.is_available():
         return 32
-    try:
-        props = t.cuda.get_device_properties(0)
-        total_vram_mb = getattr(props, 'total_mem', getattr(props, 'total_memory', 0)) / (1024 * 1024)
-    except RuntimeError:
-        return 32
-    if total_vram_mb >= 45000:
-        return 96
-    elif total_vram_mb >= 24000:
-        return 64
-    elif total_vram_mb >= 20000:
-        return 32
-    elif total_vram_mb >= 16000:
-        return 32
-    elif total_vram_mb >= 8000:
-        return 16
-    elif total_vram_mb >= 4000:
-        return 8
-    return 8
+    
+    if GPU_PLATFORM == 'amd_rocm':
+        if TOTAL_VRAM_GB >= 180:
+            return 256
+        elif TOTAL_VRAM_GB >= 120:
+            return 192
+        elif TOTAL_VRAM_GB >= 90:
+            return 128
+        elif TOTAL_VRAM_GB >= 48:
+            return 96
+        elif TOTAL_VRAM_GB >= 24:
+            return 64
+        elif TOTAL_VRAM_GB >= 16:
+            return 48
+        elif TOTAL_VRAM_GB >= 8:
+            return 32
+        else:
+            return 16
+    else:
+        if TOTAL_VRAM_GB >= 45:
+            return 96
+        elif TOTAL_VRAM_GB >= 24:
+            return 64
+        elif TOTAL_VRAM_GB >= 20:
+            return 32
+        elif TOTAL_VRAM_GB >= 16:
+            return 32
+        elif TOTAL_VRAM_GB >= 8:
+            return 16
+        elif TOTAL_VRAM_GB >= 4:
+            return 8
+        else:
+            return 8
+
+
+def _auto_num_workers():
+    """Automatically determine number of data loader workers based on CPU cores"""
+    if IS_MODELSCOPE:
+        return min(max(NUM_PHYSICAL_CORES - 2, 4), 16)
+    else:
+        return min(max(NUM_PHYSICAL_CORES - 1, 4), 16) if os.name != 'nt' else 0
+
+
+NUM_WORKERS = _auto_num_workers()
+NUM_HEADS = 6
 
 
 class Config:
@@ -64,7 +120,7 @@ class Config:
     cutmix_alpha = 1.0
     cutmix_prob = 0.5
     train_eval_interval = 10
-    use_torch_compile = False
+    use_torch_compile = GPU_PLATFORM == 'amd_rocm'
     attn_diversity_weight = 0.1
     multiscale_feat_dim = 512
     bbox_loss_weight = 5.0
@@ -87,7 +143,7 @@ class Config:
     use_char_level_acc = True
     early_stopping_patience = 20
     aux_loss_weight = 0.3
-    grad_accum_steps = 4
+    grad_accum_steps = max(1, 128 // batch_size)
 
 
 config = Config()
@@ -105,3 +161,17 @@ data_dir = {
 }
 
 t.hub.set_dir(os.path.join(BASE_DIR, 'torch_hub'))
+
+
+def print_env_info():
+    """Print environment configuration information"""
+    print("=" * 80)
+    print(f"GPU Platform: {GPU_PLATFORM.upper()}")
+    print(f"Total VRAM: {TOTAL_VRAM_GB:.1f} GB")
+    print(f"Physical CPU Cores: {NUM_PHYSICAL_CORES}")
+    print(f"Data Loader Workers: {NUM_WORKERS}")
+    print(f"Batch Size: {config.batch_size}")
+    print(f"Gradient Accumulation Steps: {config.grad_accum_steps}")
+    print(f"Equivalent Batch Size: {config.batch_size * config.grad_accum_steps}")
+    print(f"Use Torch Compile: {config.use_torch_compile}")
+    print("=" * 80)

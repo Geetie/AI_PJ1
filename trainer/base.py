@@ -10,7 +10,7 @@ from torch.optim import SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.amp import GradScaler
 from datetime import datetime
-from config import config, SCRIPT_DIR
+from config import config, SCRIPT_DIR, GPU_PLATFORM, TOTAL_VRAM_GB, NUM_PHYSICAL_CORES
 
 
 class TrainingLogger:
@@ -52,16 +52,20 @@ class TrainingLogger:
         self.logger.info(f'=== Training Initialization ===')
         self.logger.info(f'Model type: {model_type}')
         self.logger.info(f'Device: {device}')
+        self.logger.info(f'GPU Platform: {GPU_PLATFORM.upper()}')
+        self.logger.info(f'Total VRAM: {TOTAL_VRAM_GB:.1f} GB')
+        self.logger.info(f'Physical CPU Cores: {NUM_PHYSICAL_CORES}')
         self.logger.info(f'Total parameters: {total_params:,}')
         self.logger.info(f'Trainable parameters: {trainable_params:,}')
         if t.cuda.is_available():
             gpu_name = t.cuda.get_device_name(0)
-            gpu_props = t.cuda.get_device_properties(0)
-            gpu_total = getattr(gpu_props, 'total_mem', getattr(gpu_props, 'total_memory', 0)) / (1024**3)
-            self.logger.info(f'GPU: {gpu_name} ({gpu_total:.1f}GB)')
+            self.logger.info(f'GPU: {gpu_name}')
         self.logger.info(f'Batch size: {config.batch_size}')
+        self.logger.info(f'Gradient Accumulation Steps: {config.grad_accum_steps}')
+        self.logger.info(f'Equivalent Batch Size: {config.batch_size * config.grad_accum_steps}')
         self.logger.info(f'Learning rate: {config.lr}')
         self.logger.info(f'Epochs: {config.epoches}')
+        self.logger.info(f'Use Torch Compile: {config.use_torch_compile}')
         self.logger.info(f'Log file: {self.log_path}')
 
     def log_epoch_start(self, epoch):
