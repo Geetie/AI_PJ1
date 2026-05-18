@@ -1,10 +1,31 @@
 import random
 
 import numpy as np
+import torch as t
 from torchvision import transforms
 
 from config import config
 from utils.misc import PadToSquare
+
+
+_LAPACK_AVAILABLE = False
+try:
+    _a = t.randn(3, 3)
+    _b = t.randn(3)
+    t.linalg.lstsq(_a, _b)
+    _LAPACK_AVAILABLE = True
+    del _a, _b
+except RuntimeError:
+    _LAPACK_AVAILABLE = False
+
+
+def _random_perspective_or_affine(distortion_scale=0.3, fill=127):
+    if _LAPACK_AVAILABLE:
+        return transforms.RandomPerspective(distortion_scale=distortion_scale, fill=fill)
+    else:
+        return transforms.RandomAffine(
+            degrees=5, translate=(0.05, 0.05),
+            scale=(0.9, 1.1), shear=5, fill=fill)
 
 
 def resize_keep_aspect(img, bboxes, target_size):
@@ -36,7 +57,7 @@ def apply_augmentation(img):
     if config.aug_blur_prob > 0 and random.random() < config.aug_blur_prob:
         img = transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0))(img)
     if random.random() < 0.3:
-        img = transforms.RandomPerspective(distortion_scale=0.3, fill=127)(img)
+        img = _random_perspective_or_affine(distortion_scale=0.3, fill=127)(img)
     if random.random() < 0.2:
         img = transforms.RandomAdjustSharpness(sharpness_factor=2, p=0.5)(img)
     if random.random() < 0.15:

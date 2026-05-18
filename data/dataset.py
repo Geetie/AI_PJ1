@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 from config import config, data_dir
-from data.transform import transform_with_bbox, transform_test_img, resize_keep_aspect, normalize_tensor
+from data.transform import transform_with_bbox, transform_test_img, resize_keep_aspect, normalize_tensor, _random_perspective_or_affine
 from utils.misc import PadToSquare
 
 
@@ -82,7 +82,7 @@ class CTCDataset(Dataset):
                 img = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)(img)
                 img = transforms.RandomGrayscale(0.1)(img)
                 if random.random() < 0.3:
-                    img = transforms.RandomPerspective(distortion_scale=0.2, fill=127)(img)
+                    img = _random_perspective_or_affine(distortion_scale=0.2, fill=127)(img)
             else:
                 img, _ = resize_keep_aspect(img, None, self.input_size[0])
                 i = max(0, (img.size[1] - self.input_size[0]) // 2)
@@ -98,7 +98,7 @@ class CTCDataset(Dataset):
                 img = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)(img)
                 img = transforms.RandomGrayscale(0.1)(img)
                 if random.random() < 0.3:
-                    img = transforms.RandomPerspective(distortion_scale=0.2, fill=127)(img)
+                    img = _random_perspective_or_affine(distortion_scale=0.2, fill=127)(img)
             else:
                 img = PadToSquare(fill=(127, 127, 127))(img)
                 img = transforms.functional.resize(img, (self.input_size[0], self.input_size[1]))
