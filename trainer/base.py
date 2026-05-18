@@ -333,8 +333,13 @@ class BaseTrainer:
             for k, v in dicts['config'].items():
                 config.__setattr__(k, v)
         if not save_opt and config.start_epoch > 0:
-            for _ in range(config.start_epoch):
-                self.lr_scheduler.step()
+            if hasattr(self.optimizer, '_step_count') and self.optimizer._step_count > 0:
+                for _ in range(config.start_epoch):
+                    self.lr_scheduler.step()
+            else:
+                self.logger.logger.warning(
+                    f'[LOAD] Skipping lr_scheduler.step() - optimizer not initialized yet. '
+                    f'Training will continue with initial LR.'
 
     def _check_early_stopping(self, acc, epoch):
         if acc > self.best_acc:
