@@ -149,7 +149,7 @@ class A100Profile(GPUProfile):
 class AMDLargeProfile(GPUProfile):
     batch_size = 256
     eval_batch_size = 384
-    num_workers = 8
+    num_workers = 4
     prefetch_factor = 2
     persistent_workers = False
     multiprocessing_context = 'forkserver'
@@ -165,9 +165,9 @@ class AMDLargeProfile(GPUProfile):
     max_checkpoints = 3
     pin_memory = False
     tta_sizes = [320, 352, 384, 416, 448]
-    lr = 3e-3
+    lr = 5e-3
     backbone_lr_factor = 0.1
-    warmup_epochs = 5
+    warmup_epochs = 8
     dropout = 0.2
     ema_decay = 0.999
     aux_loss_weight = 0.3
@@ -312,6 +312,30 @@ class Config:
 
 
 config = Config()
+
+
+def _check_shm_and_adjust():
+    if config.num_workers <= 0:
+        return
+    try:
+        shm_stats = os.statvfs('/dev/shm')
+        shm_gb = shm_stats.f_bsize * shm_stats.f_blocks / (1024**3)
+        per_batch_mb = config.batch_size * 3 * config.input_height * config.input_width * 4 / (1024**2)
+        needed_gb = config.num_workers * config.prefetch_factor * per_batch_mb / 1024
+        if shm_gb < needed_gb * 1.5:
+            safe_workers = max(int(shm_gb * 1024 / (per_batch_mb * config.prefetch_factor * 1.5)), 0)
+            if safe_workers < config.num_workers:
+                print(f'[SHM] /dev/shm={shm_gb:.1f}GB, need={needed_gb:.1f}GB. '
+                      f'Reducing num_workers {config.num_workers}->{safe_workers}')
+                config.num_workers = safe_workers
+                if safe_workers == 0:
+                    config.prefetch_factor = None
+                    config.multiprocessing_context = None
+    except Exception:
+        pass
+
+
+_check_shm_and_adjust()
 
 CSV_PATH = os.path.join(BASE_DIR, 'mchar_data_list_0515.csv')
 dataset_path = os.path.join(BASE_DIR, 'dataset')
