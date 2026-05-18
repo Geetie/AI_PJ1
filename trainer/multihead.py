@@ -50,19 +50,8 @@ class MultiHeadTrainer(BaseTrainer):
         super().__init__()
         print(f'Using device: {self.device}')
         self._model_type = model_type or config.model_type
-        self.train_set = DigitsDataset(mode='train', aug=True,
-                                       input_size=(config.input_height, config.input_width))
-        self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
-                                              shuffle=True, drop_last=True)
-        if val:
-            self.val_set = DigitsDataset(mode='val', aug=False,
-                                         input_size=(config.input_height, config.input_width))
-            self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
-                                                shuffle=False, drop_last=False)
-        else:
-            self.val_loader = None
 
-        self._diagnose_dataloader()
+        self._gpu_sanity_check()
 
         self.model = create_model(self._model_type).to(self.device)
 
@@ -129,6 +118,20 @@ class MultiHeadTrainer(BaseTrainer):
             print('Warning: Optimizer and scheduler NOT restored. Using new config.')
 
         self._gpu_warmup()
+
+        self.train_set = DigitsDataset(mode='train', aug=True,
+                                       input_size=(config.input_height, config.input_width))
+        self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
+                                              shuffle=True, drop_last=True)
+        if val:
+            self.val_set = DigitsDataset(mode='val', aug=False,
+                                         input_size=(config.input_height, config.input_width))
+            self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
+                                                shuffle=False, drop_last=False)
+        else:
+            self.val_loader = None
+
+        self._diagnose_dataloader()
 
     def _diagnose_dataloader(self):
         print('[DIAG] Testing DataLoader first batch load...')

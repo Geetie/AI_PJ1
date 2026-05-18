@@ -25,19 +25,8 @@ class CTCTrainer(BaseTrainer):
         super().__init__()
         print(f'CTC Model - Using device: {self.device}')
         self._model_type = 'ctc'
-        self.train_set = CTCDataset(mode='train', aug=True,
-                                    input_size=(config.input_height, config.input_width))
-        self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
-                                              shuffle=True, drop_last=True,
-                                              collate_fn=ctc_collate_fn)
-        if val:
-            self.val_set = CTCDataset(mode='val', aug=False,
-                                      input_size=(config.input_height, config.input_width))
-            self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
-                                                shuffle=False, drop_last=False,
-                                                collate_fn=ctc_collate_fn)
-        else:
-            self.val_loader = None
+
+        self._gpu_sanity_check()
 
         self.model = CTCModel(num_classes=config.class_num).to(self.device)
 
@@ -93,6 +82,20 @@ class CTCTrainer(BaseTrainer):
                 self.train_log = ckpt['train_log']
 
         self._gpu_warmup()
+
+        self.train_set = CTCDataset(mode='train', aug=True,
+                                    input_size=(config.input_height, config.input_width))
+        self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
+                                              shuffle=True, drop_last=True,
+                                              collate_fn=ctc_collate_fn)
+        if val:
+            self.val_set = CTCDataset(mode='val', aug=False,
+                                      input_size=(config.input_height, config.input_width))
+            self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
+                                                shuffle=False, drop_last=False,
+                                                collate_fn=ctc_collate_fn)
+        else:
+            self.val_loader = None
 
     def _make_loader(self, dataset, batch_size, shuffle=False, drop_last=False, collate_fn=None):
         kwargs = dict(

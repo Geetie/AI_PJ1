@@ -14,7 +14,29 @@ os.environ.setdefault('MIOPEN_FIND_MODE', '2')
 os.environ.setdefault('MIOPEN_USER_DB_PATH', os.path.join(BASE_DIR, 'miopen_cache'))
 os.environ.setdefault('TRITON_CACHE_DIR', os.path.join(BASE_DIR, 'triton_cache'))
 os.environ.setdefault('TORCHINDUCTOR_CACHE_DIR', os.path.join(BASE_DIR, 'inductor_cache'))
-os.environ.setdefault('HSA_OVERRIDE_GFX_VERSION', '9.0.0')
+if IS_MODELSCOPE:
+    os.environ.setdefault('TORCH_USE_HIP_DSA', '1')
+
+if IS_MODELSCOPE and 'HSA_OVERRIDE_GFX_VERSION' not in os.environ:
+    try:
+        if t.cuda.is_available():
+            props = t.cuda.get_device_properties(0)
+            gpu_name = getattr(props, 'name', '').lower()
+            vram = getattr(props, 'total_mem', getattr(props, 'total_memory', 0)) / (1024**3)
+            if 'mi250' in gpu_name or 'mi210' in gpu_name or 'gfx90a' in gpu_name:
+                os.environ['HSA_OVERRIDE_GFX_VERSION'] = '9.0.0'
+            elif 'mi100' in gpu_name or 'gfx908' in gpu_name:
+                os.environ['HSA_OVERRIDE_GFX_VERSION'] = '9.0.1'
+            elif 'mi50' in gpu_name or 'gfx906' in gpu_name:
+                os.environ['HSA_OVERRIDE_GFX_VERSION'] = '9.0.6'
+            elif vram > 100:
+                os.environ['HSA_OVERRIDE_GFX_VERSION'] = '9.0.0'
+            else:
+                os.environ['HSA_OVERRIDE_GFX_VERSION'] = '9.0.0'
+    except Exception:
+        os.environ.setdefault('HSA_OVERRIDE_GFX_VERSION', '9.0.0')
+else:
+    os.environ.setdefault('HSA_OVERRIDE_GFX_VERSION', '9.0.0')
 
 
 def _is_triton_available():
@@ -278,15 +300,8 @@ def _detect_gpu_profile():
         else:
             return CPUProfile()
 
-    if profile.multiprocessing_context == 'fork' and GPU_PLATFORM == 'amd_rocm':
-        try:
-            import torch as _t
-            if _t.cuda.is_initialized():
-                print('[CONFIG] Warning: CUDA already initialized before fork, '
-                      'switching to forkserver to avoid potential deadlocks')
-                profile.multiprocessing_context = 'forkserver'
-        except Exception:
-            pass
+    if GPU_PLATFORM == 'amd_rocm' and profile.multiprocessing_context is not None:
+        profile.multiprocessing_context = 'spawn'
 
     if profile.use_torch_compile and not COMPILE_AVAILABLE:
         print(f'[COMPILE] torch.compile not available on this platform '

@@ -197,6 +197,43 @@ class BaseTrainer:
         print(f"\n[EMERGENCY] Received SIGUSR1 signal, will save checkpoint after current batch...")
         self._pending_save = True
 
+    def _gpu_sanity_check(self):
+        if not t.cuda.is_available():
+            return
+        print('[GPU-CHECK] Running GPU sanity check...')
+        try:
+            test = t.randn(4, 3, 32, 32, device=self.device)
+            _ = test + test
+            t.cuda.synchronize()
+            del test
+            t.cuda.empty_cache()
+            print('[GPU-CHECK] GPU sanity check passed')
+        except RuntimeError as e:
+            err_str = str(e).lower()
+            if 'hip' in err_str or 'illegal' in err_str or 'cuda' in err_str:
+                print(f'[GPU-CHECK] GPU sanity check FAILED: {e}')
+                print('[GPU-CHECK] Attempting CUDA context reset...')
+                try:
+                    t.cuda.empty_cache()
+                    t.cuda.synchronize()
+                except Exception:
+                    pass
+                try:
+                    test = t.randn(2, 3, 16, 16, device=self.device)
+                    _ = test + test
+                    t.cuda.synchronize()
+                    del test
+                    t.cuda.empty_cache()
+                    print('[GPU-CHECK] GPU recovered after reset')
+                except Exception as e2:
+                    print(f'[GPU-CHECK] GPU unrecoverable: {e2}')
+                    print('[GPU-CHECK] Falling back to CPU')
+                    self.device = t.device('cpu')
+                    self.use_amp = False
+                    config.use_torch_compile = False
+            else:
+                raise
+
     def _setup_optimizer(self, backbone_params, other_params):
         return SGD([
             {'params': backbone_params, 'lr': config.lr * config.backbone_lr_factor},

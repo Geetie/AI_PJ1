@@ -609,11 +609,11 @@ class TestCompileFallbackRebuildsEMA(unittest.TestCase):
 
 
 class TestForkCUDACheck(unittest.TestCase):
-    def test_config_checks_cuda_before_fork(self):
-        import inspect
-        from config import _detect_gpu_profile
-        source = inspect.getsource(_detect_gpu_profile)
-        self.assertIn('cuda.is_initialized', source)
+    def test_config_forces_spawn_on_amd_rocm(self):
+        from config import _detect_gpu_profile, GPU_PLATFORM
+        if GPU_PLATFORM == 'amd_rocm':
+            profile = _detect_gpu_profile()
+            self.assertEqual(profile.multiprocessing_context, 'spawn')
 
 
 def torch_close(a, b, atol=1e-5):
