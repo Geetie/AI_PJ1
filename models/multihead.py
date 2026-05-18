@@ -218,7 +218,12 @@ class DigitsResnet101(nn.Module):
     def forward(self, img, gt_bboxes=None):
         feat = self.backbone(img)
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
-        results = [head(feat) for head in self.heads]
+        results = []
+        for head in self.heads:
+            if self.training:
+                results.append(t.utils.checkpoint.checkpoint(head, feat, False, use_reentrant=False))
+            else:
+                results.append(head(feat))
         bbox_outs = tuple(r[1] for r in results)
         head_feats = [r[2] for r in results]
         interacted = self.head_interaction(head_feats)
@@ -232,11 +237,15 @@ class DigitsResnet101(nn.Module):
         head_cls_outs, bbox_outs, attn_maps = [], [], []
         head_feats = []
         for head in self.heads:
-            cls_out, bbox_out, hidden, attn = head(feat, return_attn=True)
+            if self.training:
+                cls_out, bbox_out, hidden, attn = t.utils.checkpoint.checkpoint(
+                    head, feat, True, use_reentrant=False)
+            else:
+                cls_out, bbox_out, hidden, attn = head(feat, return_attn=True)
             head_cls_outs.append(cls_out)
             bbox_outs.append(bbox_out)
             head_feats.append(hidden)
-            attn_maps.append(attn)
+            attn_maps.append(attn.detach() if self.training else attn)
         bbox_tuple = tuple(bbox_outs)
         interacted = self.head_interaction(head_feats)
         cls_list = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
