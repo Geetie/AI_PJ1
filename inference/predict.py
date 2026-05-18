@@ -1,4 +1,5 @@
 import os
+import time
 import torch as t
 import torch.nn.functional as F
 from tqdm.auto import tqdm
@@ -9,9 +10,60 @@ from models import create_model
 from models.ctc import CTCModel
 from inference.decode import parse2class, parse2class_from_probs, ctc_beam_decode
 from utils.misc import write2csv
+from utils.compile_utils import (
+    try_compile_model, is_compile_available, CompileLogger, configure_compile_cache
+)
 
 
-def predicts(model_path, csv_path, use_tta=True, model_type=None):
+def _compile_and_warmup_model(model, device, warmup_shapes=None, mode='max-autotune'):
+    logger = CompileLogger.get_instance()
+    if not is_compile_available():
+        logger.logger.info('[COMPILE-INFERENCE] torch.compile not available, skipping')
+        return model
+
+    configure_compile_cache()
+    logger.log_compile_config({
+        'context': 'inference',
+        'mode': mode,
+        'dynamic': True,
+        'warmup_shapes': [list(s) for s in warmup_shapes] if warmup_shapes else None,
+    })
+
+    with logger.phase('inference_compile'):
+        model, compile_ok = try_compile_model(model, mode=mode, dynamic=True)
+    if not compile_ok:
+        return model
+
+    if warmup_shapes is None:
+        warmup_shapes = [(min(config.eval_batch_size, 16), config.input_height, config.input_width)]
+
+    warmup_start = time.time()
+    with logger.phase('inference_warmup'):
+        for shape_idx, (bs, h, w) in enumerate(warmup_shapes):
+            step_start = time.time()
+            try:
+                dummy = t.randn(bs, 3, h, w, device=device)
+                with t.no_grad():
+                    _ = model(dummy)
+                t.cuda.synchronize()
+                step_latency = time.time() - step_start
+                logger.log_warmup_shape(
+                    (bs, h, w), 0, step_latency,
+                    is_first_compile=(shape_idx == 0))
+                del dummy
+            except Exception as e:
+                step_latency = time.time() - step_start
+                logger.log_warmup_shape(
+                    (bs, h, w), 0, step_latency, error=e)
+    warmup_time = time.time() - warmup_start
+    logger.log_warmup_summary(warmup_time, len(warmup_shapes), 1)
+    logger.log_dynamo_stats()
+
+    t.cuda.empty_cache()
+    return model
+
+
+def predicts(model_path, csv_path, use_tta=True, model_type=None, use_compile=False):
     device = t.device('cuda') if t.cuda.is_available() else t.device('cpu')
     mt = model_type or config.model_type
     res_net = create_model(mt).to(device)
@@ -21,6 +73,11 @@ def predicts(model_path, csv_path, use_tta=True, model_type=None):
         mt = ckpt['model_type']
     print('Load model from %s successfully' % model_path)
     res_net.eval()
+
+    if use_compile:
+        warmup_shapes = [(min(config.eval_batch_size, 16), s, s) for s in config.tta_sizes]
+        warmup_shapes.append((min(config.eval_batch_size, 16), config.input_height, config.input_width))
+        res_net = _compile_and_warmup_model(res_net, device, warmup_shapes)
 
     if use_tta:
         test_set_for_count = DigitsDataset(mode='test', aug=False,
@@ -63,7 +120,7 @@ def predicts(model_path, csv_path, use_tta=True, model_type=None):
     return results
 
 
-def ensemble_predict(model_paths, csv_path, model_type=None):
+def ensemble_predict(model_paths, csv_path, model_type=None, use_compile=False):
     device = t.device('cuda') if t.cuda.is_available() else t.device('cpu')
     mt = model_type or config.model_type
     models = []
@@ -72,6 +129,9 @@ def ensemble_predict(model_paths, csv_path, model_type=None):
         ckpt = t.load(mp, map_location=device, weights_only=False)
         m.load_state_dict(ckpt['model'])
         m.eval()
+        if use_compile:
+            warmup_shapes = [(min(config.eval_batch_size, 16), s, s) for s in config.tta_sizes]
+            m = _compile_and_warmup_model(m, device, warmup_shapes)
         models.append(m)
         print(f'Loaded model: {mp}')
 
@@ -105,12 +165,16 @@ def ensemble_predict(model_paths, csv_path, model_type=None):
     return results
 
 
-def ctc_predict(model_path, csv_path, use_tta=False):
+def ctc_predict(model_path, csv_path, use_tta=False, use_compile=False):
     device = t.device('cuda') if t.cuda.is_available() else t.device('cpu')
     model = CTCModel(num_classes=config.class_num).to(device)
     model.load_state_dict(t.load(model_path, map_location=device, weights_only=False)['model'])
     print('Load CTC model from %s successfully' % model_path)
     model.eval()
+
+    if use_compile:
+        warmup_shapes = [(min(config.eval_batch_size, 16), config.input_height, config.input_width)]
+        model = _compile_and_warmup_model(model, device, warmup_shapes)
     char_list = [str(i) for i in range(10)] + ['']
 
     test_loader = make_dataloader(CTCDataset(mode='test', aug=False,

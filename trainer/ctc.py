@@ -1,5 +1,6 @@
 import gc
 import time
+import threading
 import torch as t
 import torch.nn as nn
 from torch.amp import autocast
@@ -11,6 +12,9 @@ from data.dataset import CTCDataset, ctc_collate_fn, ctc_test_collate_fn
 from models.ctc import CTCModel
 from trainer.base import BaseTrainer, ModelEMA
 from inference.decode import ctc_greedy_decode, ctc_beam_decode
+from utils.compile_utils import (
+    try_compile_model, warmup_model, get_raw_model, CompileLogger, configure_compile_cache
+)
 
 
 class CTCTrainer(BaseTrainer):
@@ -39,8 +43,33 @@ class CTCTrainer(BaseTrainer):
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
         self.criterion = nn.CTCLoss(blank=10, zero_infinity=True)
 
-        backbone_params = list(self.model.backbone.parameters())
-        other_params = [p for n, p in self.model.named_parameters() if not n.startswith('backbone.')]
+        self._compile_logger = CompileLogger.get_instance()
+        if config.use_torch_compile and t.cuda.is_available():
+            configure_compile_cache()
+            self._compile_logger.log_compile_config({
+                'use_torch_compile': True,
+                'compile_mode': config.compile_mode,
+                'compile_dynamic': config.compile_dynamic,
+                'compile_fullgraph': config.compile_fullgraph,
+                'model_type': 'ctc',
+                'batch_size': config.batch_size,
+                'input_size': f'{config.input_height}x{config.input_width}',
+            })
+            with self._compile_logger.phase('compile_ctc'):
+                self.model, compile_ok = try_compile_model(
+                    self.model, mode=config.compile_mode,
+                    dynamic=config.compile_dynamic, fullgraph=config.compile_fullgraph)
+            if not compile_ok:
+                config.use_torch_compile = False
+        else:
+            self._compile_logger.log_compile_config({
+                'use_torch_compile': False,
+                'reason': 'no_cuda' if not t.cuda.is_available() else 'disabled',
+            })
+
+        backbone_params = list(get_raw_model(self.model).backbone.parameters())
+        other_params = [p for n, p in get_raw_model(self.model).named_parameters()
+                        if not n.startswith('backbone.')]
         self.optimizer = self._setup_optimizer(backbone_params, other_params)
         self.lr_scheduler = self._setup_scheduler()
         self.scaler = self._setup_scaler()
@@ -50,6 +79,8 @@ class CTCTrainer(BaseTrainer):
 
         if config.pretrained is not None:
             self.load_model(config.pretrained, save_opt=False)
+
+        self._gpu_warmup()
 
     def _make_loader(self, dataset, batch_size, shuffle=False, drop_last=False, collate_fn=None):
         kwargs = dict(
@@ -88,6 +119,78 @@ class CTCTrainer(BaseTrainer):
             self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
                                                 shuffle=False, drop_last=False,
                                                 collate_fn=ctc_collate_fn)
+
+    def _gpu_warmup(self):
+        if not t.cuda.is_available():
+            return
+        warmup_bs = min(config.batch_size, 16)
+        compile_info = " (torch.compile)" if config.use_torch_compile else ""
+        print(f'[WARMUP-CTC] Starting GPU warmup with bs={warmup_bs}{compile_info}...')
+
+        raw_model = get_raw_model(self.model)
+        saved_state = None
+        try:
+            saved_state = {k: v.clone() for k, v in raw_model.state_dict().items()}
+        except Exception:
+            saved_state = None
+
+        warmup_start = time.time()
+
+        try:
+            with self._compile_logger.phase('warmup_ctc_forward'):
+                dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
+                with t.no_grad(), autocast(self.device.type, enabled=self.use_amp):
+                    _ = self.model(dummy)
+                t.cuda.synchronize()
+                del dummy
+                t.cuda.empty_cache()
+            warmup_time = time.time() - warmup_start
+            self._compile_logger.log_warmup_summary(warmup_time, 1, 1)
+            print(f'[WARMUP-CTC] Forward warmup completed')
+        except RuntimeError as e:
+            if 'out of memory' in str(e).lower():
+                t.cuda.empty_cache()
+                try:
+                    warmup_bs = max(warmup_bs // 4, 4)
+                    dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
+                    with t.no_grad():
+                        _ = self.model(dummy)
+                    t.cuda.synchronize()
+                    del dummy
+                    t.cuda.empty_cache()
+                    print(f'[WARMUP-CTC] Fallback warmup completed with bs={warmup_bs}')
+                except Exception as e2:
+                    print(f'[WARMUP-CTC] Fallback warmup also failed: {e2}')
+                    t.cuda.empty_cache()
+            else:
+                print(f'[WARMUP-CTC] GPU warmup failed: {e}')
+                t.cuda.empty_cache()
+        except Exception as e:
+            err_str = str(e).lower()
+            if config.use_torch_compile and ('compile' in err_str or 'triton' in err_str or 'inductor' in err_str):
+                print(f'[WARMUP-CTC] torch.compile failed during warmup: {e}')
+                print(f'[WARMUP-CTC] Disabling torch.compile and falling back to eager mode')
+                self._compile_logger.logger.warning(
+                    f'[WARMUP-CTC] torch.compile failed, falling back to eager: {e}')
+                config.use_torch_compile = False
+                self.model = get_raw_model(self.model)
+                t.cuda.empty_cache()
+            else:
+                print(f'[WARMUP-CTC] GPU warmup failed: {e}')
+                t.cuda.empty_cache()
+
+        if saved_state is not None:
+            try:
+                raw_model.load_state_dict(saved_state)
+                if self.ema is not None:
+                    self.ema.ema.load_state_dict(saved_state)
+                del saved_state
+                t.cuda.empty_cache()
+                print(f'[WARMUP-CTC] Model weights restored after warmup')
+            except Exception:
+                del saved_state
+
+        self._compile_logger.log_dynamo_stats()
 
     def _train_epoch(self, epoch):
         self.model.train()

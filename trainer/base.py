@@ -13,6 +13,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.amp import GradScaler
 from datetime import datetime
 from config import config, SCRIPT_DIR, GPU_PLATFORM, TOTAL_VRAM_GB, NUM_PHYSICAL_CORES
+from utils.compile_utils import get_raw_model as _get_raw_model_external
 
 
 class TrainingLogger:
@@ -409,9 +410,7 @@ class BaseTrainer:
         t.save(dicts, save_path)
 
     def _get_raw_model(self):
-        if hasattr(self.model, '_orig_mod'):
-            return self.model._orig_mod
-        return self.model
+        return _get_raw_model_external(self.model)
 
     def load_model(self, load_path, skip_load_weights=False, save_opt=False, save_config=False):
         dicts = t.load(load_path, map_location=self.device, weights_only=False)

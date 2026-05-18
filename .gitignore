@@ -1,6 +1,7 @@
 dataset/
 checkpoints/
 logs/
+compile_cache/
 torch_hub/
 *.pth
 *.zip

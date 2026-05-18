@@ -1,4 +1,5 @@
 import os
+import sys
 import multiprocessing
 import torch as t
 
@@ -12,6 +13,32 @@ os.environ.setdefault('MIOPEN_DISABLE_CACHE', '0')
 os.environ.setdefault('MIOPEN_FIND_MODE', '2')
 os.environ.setdefault('MIOPEN_USER_DB_PATH', os.path.join(BASE_DIR, 'miopen_cache'))
 os.environ.setdefault('TRITON_CACHE_DIR', os.path.join(BASE_DIR, 'triton_cache'))
+
+
+def _is_triton_available():
+    if sys.platform == 'win32':
+        return False
+    try:
+        import triton
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+def _is_compile_available():
+    if not t.cuda.is_available():
+        return False
+    if sys.platform == 'win32':
+        return False
+    try:
+        import torch._inductor
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+TRITON_AVAILABLE = _is_triton_available()
+COMPILE_AVAILABLE = _is_compile_available()
 
 
 def _detect_gpu_platform():
@@ -61,6 +88,8 @@ class GPUProfile:
     grad_accum_steps = 1
     use_torch_compile = False
     compile_mode = 'default'
+    compile_dynamic = False
+    compile_fullgraph = False
     use_gradient_checkpoint = True
     oom_headroom_ratio = 0.15
     max_checkpoints = 3
@@ -202,7 +231,7 @@ def _detect_gpu_profile():
         return CPUProfile()
     if GPU_PLATFORM == 'amd_rocm':
         if TOTAL_VRAM_GB >= 120:
-            return AMDLargeProfile()
+            profile = AMDLargeProfile()
         elif TOTAL_VRAM_GB >= 48:
             profile = GPUProfile()
             profile.batch_size = 128
@@ -212,7 +241,6 @@ def _detect_gpu_profile():
             profile.pin_memory = False
             profile.use_torch_compile = True
             profile.compile_mode = 'default'
-            return profile
         else:
             profile = GPUProfile()
             profile.batch_size = 64
@@ -221,7 +249,6 @@ def _detect_gpu_profile():
             profile.pin_memory = False
             profile.use_torch_compile = True
             profile.compile_mode = 'default'
-            return profile
     else:
         if TOTAL_VRAM_GB >= 40:
             profile = GPUProfile()
@@ -229,25 +256,29 @@ def _detect_gpu_profile():
             profile.eval_batch_size = 160
             profile.num_workers = min(max(NUM_PHYSICAL_CORES - 2, 4), 12)
             profile.prefetch_factor = 2
-            return profile
         elif TOTAL_VRAM_GB >= 24:
-            return A100Profile()
+            profile = A100Profile()
         elif TOTAL_VRAM_GB >= 16:
             profile = GPUProfile()
             profile.batch_size = 32
             profile.eval_batch_size = 64
             profile.grad_accum_steps = 4
             profile.num_workers = min(max(NUM_PHYSICAL_CORES - 2, 4), 8)
-            return profile
         elif TOTAL_VRAM_GB >= 8:
             profile = GPUProfile()
             profile.batch_size = 16
             profile.eval_batch_size = 32
             profile.grad_accum_steps = 8
             profile.num_workers = min(max(NUM_PHYSICAL_CORES - 1, 2), 4)
-            return profile
         else:
             return CPUProfile()
+
+    if profile.use_torch_compile and not COMPILE_AVAILABLE:
+        print(f'[COMPILE] torch.compile not available on this platform '
+              f'(platform={sys.platform}, triton={TRITON_AVAILABLE}), disabling')
+        profile.use_torch_compile = False
+
+    return profile
 
 
 ACTIVE_PROFILE = _detect_gpu_profile()
@@ -283,6 +314,8 @@ class Config:
     train_eval_interval = 10
     use_torch_compile = ACTIVE_PROFILE.use_torch_compile
     compile_mode = ACTIVE_PROFILE.compile_mode
+    compile_dynamic = ACTIVE_PROFILE.compile_dynamic
+    compile_fullgraph = ACTIVE_PROFILE.compile_fullgraph
     attn_diversity_weight = ACTIVE_PROFILE.attn_diversity_weight
     multiscale_feat_dim = ACTIVE_PROFILE.multiscale_feat_dim
     bbox_loss_weight = ACTIVE_PROFILE.bbox_loss_weight
@@ -393,6 +426,10 @@ def print_env_info():
     print(f"Use Torch Compile: {config.use_torch_compile}")
     if config.use_torch_compile:
         print(f"Compile Mode: {config.compile_mode}")
+        print(f"Compile Dynamic: {config.compile_dynamic}")
+        print(f"Compile Fullgraph: {config.compile_fullgraph}")
+    print(f"Compile Available: {COMPILE_AVAILABLE}")
+    print(f"Triton Available: {TRITON_AVAILABLE}")
     print(f"Gradient Checkpoint: {config.use_gradient_checkpoint}")
     print(f"Pin Memory: {config.pin_memory}")
     print(f"Prefetch Factor: {config.prefetch_factor}")

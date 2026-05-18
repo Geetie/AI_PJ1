@@ -18,6 +18,10 @@ from losses.classification import LabelSmoothEntropy
 from losses.attention import AttentionSupervisionLoss, attention_diversity_loss, spatial_ordering_loss
 from losses.augmentation import cutmix_data
 from trainer.base import BaseTrainer, ModelEMA
+from utils.compile_utils import (
+    try_compile_model, warmup_model, get_raw_model, configure_dynamo_cache,
+    CompileLogger, configure_compile_cache
+)
 
 
 def _compute_joint_acc(pred_heads, labels, true_lengths, num_heads):
@@ -66,13 +70,30 @@ class MultiHeadTrainer(BaseTrainer):
         other_params = [p for n, p in self.model.named_parameters() if not n.startswith('backbone.')]
 
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
+        self._compile_logger = CompileLogger.get_instance()
         if config.use_torch_compile and t.cuda.is_available():
-            try:
-                self.model = t.compile(self.model, mode=config.compile_mode)
-                print(f'torch.compile enabled (mode={config.compile_mode})')
-            except Exception as e:
-                print(f'torch.compile failed: {e}, falling back to eager mode')
+            configure_dynamo_cache()
+            configure_compile_cache()
+            self._compile_logger.log_compile_config({
+                'use_torch_compile': True,
+                'compile_mode': config.compile_mode,
+                'compile_dynamic': config.compile_dynamic,
+                'compile_fullgraph': config.compile_fullgraph,
+                'model_type': self._model_type,
+                'batch_size': config.batch_size,
+                'input_size': f'{config.input_height}x{config.input_width}',
+            })
+            with self._compile_logger.phase('compile_multihead'):
+                self.model, compile_ok = try_compile_model(
+                    self.model, mode=config.compile_mode,
+                    dynamic=config.compile_dynamic, fullgraph=config.compile_fullgraph)
+            if not compile_ok:
                 config.use_torch_compile = False
+        else:
+            self._compile_logger.log_compile_config({
+                'use_torch_compile': False,
+                'reason': 'no_cuda' if not t.cuda.is_available() else 'disabled',
+            })
 
         self.attn_supervision = AttentionSupervisionLoss()
 
@@ -125,11 +146,14 @@ class MultiHeadTrainer(BaseTrainer):
                                                         shuffle=False, drop_last=False)
 
     def _gpu_warmup(self):
+        if not t.cuda.is_available():
+            return
         warmup_bs = config.batch_size
-        compile_info = " (MIOpen + torch.compile)" if config.use_torch_compile else " (MIOpen)"
+        compile_info = " (torch.compile)" if config.use_torch_compile else ""
         print(f'[WARMUP] Starting GPU warmup with bs={warmup_bs}{compile_info}...')
-        print(f'[WARMUP] Kernel compilation in progress (may take 5-15 min on first run)')
-        print(f'[WARMUP] Subsequent runs will use cached kernels and be much faster')
+        if config.use_torch_compile:
+            print(f'[WARMUP] Kernel compilation in progress (may take 5-15 min on first run)')
+            print(f'[WARMUP] Subsequent runs will use cached kernels and be much faster')
 
         raw_model = self._get_raw_model()
         saved_state = None
@@ -145,37 +169,40 @@ class MultiHeadTrainer(BaseTrainer):
             elapsed = 0
             while not heartbeat_stop.wait(30):
                 elapsed += 30
-                print(f'[WARMUP] Still compiling kernels... ({elapsed}s elapsed, this is normal on first run)')
+                print(f'[WARMUP] Still compiling kernels... ({elapsed}s elapsed)')
 
         ht = threading.Thread(target=_heartbeat, daemon=True)
         ht.start()
 
         try:
-            dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
-            dummy_label = t.randint(0, config.class_num, (warmup_bs, config.num_heads), device=self.device)
-            dummy_bbox = t.rand(warmup_bs, config.num_heads, 4, device=self.device)
-            dummy_mask = t.ones(warmup_bs, config.num_heads, device=self.device)
-            for i in range(config.num_heads):
-                dummy_mask[:, i] = (t.rand(warmup_bs) > 0.3).float()
+            with self._compile_logger.phase('warmup_forward_backward'):
+                dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
+                dummy_label = t.randint(0, config.class_num, (warmup_bs, config.num_heads), device=self.device)
+                dummy_bbox = t.rand(warmup_bs, config.num_heads, 4, device=self.device)
 
-            print(f'[WARMUP] Running forward pass (bs={warmup_bs})...')
-            with autocast(self.device.type, enabled=self.use_amp):
-                pred, pred_bboxes, attn_maps, head_cls_outs = self.model.forward_with_attn(dummy, gt_bboxes=dummy_bbox)
-                cls_loss = sum(self.head_criteria[h](pred[h], dummy_label[:, h]) for h in range(config.num_heads))
-                loss = cls_loss / config.grad_accum_steps
+                print(f'[WARMUP] Running forward+backward pass (bs={warmup_bs})...')
+                with autocast(self.device.type, enabled=self.use_amp):
+                    pred, pred_bboxes, attn_maps, head_cls_outs = self.model.forward_with_attn(dummy, gt_bboxes=dummy_bbox)
+                    cls_loss = sum(self.head_criteria[h](pred[h], dummy_label[:, h]) for h in range(config.num_heads))
+                    loss = cls_loss / config.grad_accum_steps
 
-            print(f'[WARMUP] Forward done, running backward pass...')
-            self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-            self.optimizer.zero_grad()
-            t.cuda.synchronize()
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                self.optimizer.zero_grad()
+                t.cuda.synchronize()
 
-            del dummy, dummy_label, dummy_bbox, dummy_mask, pred, pred_bboxes, attn_maps, head_cls_outs, loss
-            t.cuda.empty_cache()
+                del dummy, dummy_label, dummy_bbox, pred, pred_bboxes, attn_maps, head_cls_outs, loss
+                t.cuda.empty_cache()
 
             warmup_time = time.time() - warmup_start
-            print(f'[WARMUP] GPU warmup completed in {warmup_time:.1f}s (forward+backward with bs={warmup_bs})')
+            self._compile_logger.log_warmup_summary(warmup_time, 1, 1)
+            print(f'[WARMUP] Primary warmup completed in {warmup_time:.1f}s (forward+backward with bs={warmup_bs})')
+
+            if config.use_torch_compile:
+                with self._compile_logger.phase('warmup_tta_shapes'):
+                    self._warmup_tta_shapes(warmup_bs)
+
         except RuntimeError as e:
             if 'out of memory' in str(e).lower():
                 print(f'[WARMUP] OOM with bs={warmup_bs}, trying bs={warmup_bs // 4}...')
@@ -183,14 +210,13 @@ class MultiHeadTrainer(BaseTrainer):
                 try:
                     warmup_bs = warmup_bs // 4
                     dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
-                    dummy_label = t.randint(0, config.class_num, (warmup_bs, config.num_heads), device=self.device)
-                    dummy_bbox = t.rand(warmup_bs, config.num_heads, 4, device=self.device)
                     with t.no_grad():
                         _ = self.model(dummy)
                     t.cuda.synchronize()
-                    del dummy, dummy_label, dummy_bbox
+                    del dummy
                     t.cuda.empty_cache()
                     warmup_time = time.time() - warmup_start
+                    self._compile_logger.log_warmup_summary(warmup_time, 1, 1)
                     print(f'[WARMUP] Fallback warmup completed in {warmup_time:.1f}s (inference only with bs={warmup_bs})')
                 except Exception as e2:
                     print(f'[WARMUP] Fallback warmup also failed: {e2}')
@@ -203,9 +229,10 @@ class MultiHeadTrainer(BaseTrainer):
             if config.use_torch_compile and ('compile' in err_str or 'triton' in err_str or 'inductor' in err_str):
                 print(f'[WARMUP] torch.compile failed during warmup: {e}')
                 print(f'[WARMUP] Disabling torch.compile and falling back to eager mode')
+                self._compile_logger.logger.warning(
+                    f'[WARMUP] torch.compile failed, falling back to eager: {e}')
                 config.use_torch_compile = False
-                raw_model = self._get_raw_model()
-                self.model = raw_model
+                self.model = self._get_raw_model()
                 t.cuda.empty_cache()
                 try:
                     dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
@@ -236,6 +263,41 @@ class MultiHeadTrainer(BaseTrainer):
                 print(f'[WARMUP] Model weights restored after warmup')
             except Exception:
                 del saved_state
+
+        self._compile_logger.log_dynamo_stats()
+
+    def _warmup_tta_shapes(self, warmup_bs):
+        if not config.use_torch_compile or not t.cuda.is_available():
+            return
+        tta_shapes = [(s, s) for s in config.tta_sizes]
+        eval_bs = min(config.eval_batch_size, warmup_bs)
+        print(f'[WARMUP] Warming up TTA shapes: {tta_shapes} with bs={eval_bs}...')
+        tta_start = time.time()
+        for h, w in tta_shapes:
+            try:
+                dummy = t.randn(eval_bs, 3, h, w, device=self.device)
+                with t.no_grad(), autocast(self.device.type, enabled=self.use_amp):
+                    _ = self.model(dummy)
+                t.cuda.synchronize()
+                del dummy
+            except RuntimeError as e:
+                if 'out of memory' in str(e).lower():
+                    t.cuda.empty_cache()
+                    try:
+                        small_bs = max(eval_bs // 4, 4)
+                        dummy = t.randn(small_bs, 3, h, w, device=self.device)
+                        with t.no_grad():
+                            _ = self.model(dummy)
+                        t.cuda.synchronize()
+                        del dummy
+                    except Exception:
+                        pass
+                    t.cuda.empty_cache()
+                else:
+                    print(f'[WARMUP] TTA shape ({h},{w}) warmup failed: {e}')
+        t.cuda.empty_cache()
+        tta_time = time.time() - tta_start
+        print(f'[WARMUP] TTA shape warmup completed in {tta_time:.1f}s')
 
     def _compute_class_weights(self):
         class_counts = t.zeros(config.class_num)
@@ -271,16 +333,17 @@ class MultiHeadTrainer(BaseTrainer):
         return DataLoader(dataset, **kwargs)
 
     def _pre_epoch_hook(self, epoch):
-        if hasattr(self.model, 'set_roi_gt_prob'):
+        raw_model = self._get_raw_model()
+        if hasattr(raw_model, 'set_roi_gt_prob'):
             if epoch < config.warmup_epochs:
-                self.model.set_roi_gt_prob(1.0)
+                raw_model.set_roi_gt_prob(1.0)
             else:
                 decay_end = int(config.epoches * 0.6)
                 if epoch >= decay_end:
-                    self.model.set_roi_gt_prob(0.0)
+                    raw_model.set_roi_gt_prob(0.0)
                 else:
                     progress = (epoch - config.warmup_epochs) / max(decay_end - config.warmup_epochs, 1)
-                    self.model.set_roi_gt_prob(1.0 - progress)
+                    raw_model.set_roi_gt_prob(1.0 - progress)
 
     def _cleanup_dataloader(self, loader):
         if loader is not None:
@@ -460,7 +523,7 @@ class MultiHeadTrainer(BaseTrainer):
         if self.ema is not None:
             model = self.ema.to_device(self.device)
         else:
-            model = self.model
+            model = self._get_raw_model()
         model.eval()
         eval_bs = config.eval_batch_size
         max_retries = 3
@@ -523,7 +586,7 @@ class MultiHeadTrainer(BaseTrainer):
         if self.ema is not None:
             model = self.ema.to_device(self.device)
         else:
-            model = self.model
+            model = self._get_raw_model()
         model.eval()
         head_corrects = [0] * config.num_heads
         head_totals = [0] * config.num_heads
@@ -571,7 +634,7 @@ class MultiHeadTrainer(BaseTrainer):
         if self.ema is not None:
             model = self.ema.to_device(self.device)
         else:
-            model = self.model
+            model = self._get_raw_model()
         model.eval()
 
         all_probs = [t.zeros(len(self.val_set), config.class_num, device='cpu') for _ in range(config.num_heads)]
