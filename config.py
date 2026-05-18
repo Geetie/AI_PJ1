@@ -246,7 +246,8 @@ class A100Profile(GPUProfile):
     use_torch_compile = True
     compile_mode = 'default'
     compile_dynamic = False
-    oom_headroom_ratio = 0.15
+    use_gradient_checkpoint = False
+    oom_headroom_ratio = 0.10
     max_checkpoints = 3
     pin_memory = True
     tta_sizes = [384, 416]
