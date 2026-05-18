@@ -1,10 +1,9 @@
 import os
 import torch as t
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from config import config, BASE_DIR
+from config import config, BASE_DIR, make_dataloader
 from data.dataset import DigitsDataset, CTCDataset, ctc_test_collate_fn
 from models import create_model
 from models.ctc import CTCModel
@@ -33,9 +32,8 @@ def predicts(model_path, csv_path, use_tta=True, model_type=None):
         for tta_size in config.tta_sizes:
             test_set_tta = DigitsDataset(mode='test', aug=False,
                                          input_size=(tta_size, tta_size))
-            test_loader_tta = DataLoader(test_set_tta, batch_size=config.eval_batch_size,
-                                         shuffle=False, num_workers=config.num_workers, pin_memory=config.pin_memory,
-                                         drop_last=False, persistent_workers=False)
+            test_loader_tta = make_dataloader(test_set_tta, batch_size=config.eval_batch_size,
+                                              shuffle=False, drop_last=False)
             sample_idx = 0
             with t.no_grad():
                 for img, img_names in tqdm(test_loader_tta, desc=f'Test TTA size={tta_size}'):
@@ -50,10 +48,9 @@ def predicts(model_path, csv_path, use_tta=True, model_type=None):
 
         results = [[name, code] for name, code in zip(all_names, parse2class_from_probs(all_probs))]
     else:
-        test_loader = DataLoader(DigitsDataset(mode='test', aug=False,
-                                               input_size=(config.input_height, config.input_width)),
-                                 batch_size=config.eval_batch_size, shuffle=False, num_workers=config.num_workers,
-                                 pin_memory=config.pin_memory, drop_last=False, persistent_workers=config.num_workers > 0)
+        test_loader = make_dataloader(DigitsDataset(mode='test', aug=False,
+                                                     input_size=(config.input_height, config.input_width)),
+                                      batch_size=config.eval_batch_size, shuffle=False, drop_last=False)
         results = []
         with t.no_grad():
             for img, img_names in tqdm(test_loader):
@@ -87,9 +84,8 @@ def ensemble_predict(model_paths, csv_path, model_type=None):
     for tta_size in config.tta_sizes:
         test_set_tta = DigitsDataset(mode='test', aug=False,
                                      input_size=(tta_size, tta_size))
-        test_loader_tta = DataLoader(test_set_tta, batch_size=config.eval_batch_size,
-                                     shuffle=False, num_workers=config.num_workers, pin_memory=config.pin_memory,
-                                     drop_last=False, persistent_workers=False)
+        test_loader_tta = make_dataloader(test_set_tta, batch_size=config.eval_batch_size,
+                                          shuffle=False, drop_last=False)
         sample_idx = 0
         with t.no_grad():
             for img, img_names in tqdm(test_loader_tta, desc=f'Ensemble TTA size={tta_size}'):
@@ -117,11 +113,10 @@ def ctc_predict(model_path, csv_path, use_tta=False):
     model.eval()
     char_list = [str(i) for i in range(10)] + ['']
 
-    test_loader = DataLoader(CTCDataset(mode='test', aug=False,
-                                        input_size=(config.input_height, config.input_width)),
-                             batch_size=config.eval_batch_size, shuffle=False, num_workers=config.num_workers,
-                             pin_memory=config.pin_memory, drop_last=False, persistent_workers=config.num_workers > 0,
-                             collate_fn=ctc_test_collate_fn)
+    test_loader = make_dataloader(CTCDataset(mode='test', aug=False,
+                                              input_size=(config.input_height, config.input_width)),
+                                  batch_size=config.eval_batch_size, shuffle=False, drop_last=False,
+                                  collate_fn=ctc_test_collate_fn)
     results = []
     with t.no_grad():
         for img, img_names in tqdm(test_loader, desc='CTC Predict'):
@@ -157,13 +152,11 @@ def cross_model_ensemble(multihead_path, ctc_path, csv_path, model_type=None):
     assert len(mh_test_set) == len(ctc_test_set), \
         f'Multihead test set ({len(mh_test_set)}) != CTC test set ({len(ctc_test_set)})'
 
-    mh_test_loader = DataLoader(mh_test_set, batch_size=config.eval_batch_size,
-                                shuffle=False, num_workers=config.num_workers, pin_memory=config.pin_memory,
-                                drop_last=False, persistent_workers=False)
-    ctc_test_loader = DataLoader(ctc_test_set, batch_size=config.eval_batch_size,
-                                 shuffle=False, num_workers=config.num_workers, pin_memory=config.pin_memory,
-                                 drop_last=False, persistent_workers=False,
-                                 collate_fn=ctc_test_collate_fn)
+    mh_test_loader = make_dataloader(mh_test_set, batch_size=config.eval_batch_size,
+                                     shuffle=False, drop_last=False)
+    ctc_test_loader = make_dataloader(ctc_test_set, batch_size=config.eval_batch_size,
+                                      shuffle=False, drop_last=False,
+                                      collate_fn=ctc_test_collate_fn)
 
     char_list = [str(i) for i in range(10)] + ['']
     results = []

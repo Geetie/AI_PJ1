@@ -23,18 +23,15 @@ class CTCTrainer(BaseTrainer):
         self._model_type = 'ctc'
         self.train_set = CTCDataset(mode='train', aug=True,
                                     input_size=(config.input_height, config.input_width))
-        self.train_loader = DataLoader(self.train_set, batch_size=config.batch_size, shuffle=True,
-                                       num_workers=config.num_workers, pin_memory=config.pin_memory,
-                                       persistent_workers=config.num_workers > 0,
-                                       drop_last=True, prefetch_factor=config.prefetch_factor,
-                                       collate_fn=ctc_collate_fn)
+        self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
+                                              shuffle=True, drop_last=True,
+                                              collate_fn=ctc_collate_fn)
         if val:
             self.val_set = CTCDataset(mode='val', aug=False,
                                       input_size=(config.input_height, config.input_width))
-            self.val_loader = DataLoader(self.val_set, batch_size=config.eval_batch_size,
-                                         num_workers=config.num_workers, pin_memory=config.pin_memory, drop_last=False,
-                                         persistent_workers=config.num_workers > 0,
-                                         prefetch_factor=config.prefetch_factor, collate_fn=ctc_collate_fn)
+            self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
+                                                shuffle=False, drop_last=False,
+                                                collate_fn=ctc_collate_fn)
         else:
             self.val_loader = None
 
@@ -54,6 +51,20 @@ class CTCTrainer(BaseTrainer):
         if config.pretrained is not None:
             self.load_model(config.pretrained, save_opt=False)
 
+    def _make_loader(self, dataset, batch_size, shuffle=False, drop_last=False, collate_fn=None):
+        kwargs = dict(
+            batch_size=batch_size, shuffle=shuffle,
+            num_workers=config.num_workers, pin_memory=config.pin_memory,
+            drop_last=drop_last, prefetch_factor=config.prefetch_factor,
+        )
+        if collate_fn is not None:
+            kwargs['collate_fn'] = collate_fn
+        if config.num_workers > 0:
+            kwargs['persistent_workers'] = config.persistent_workers
+        if config.multiprocessing_context is not None:
+            kwargs['multiprocessing_context'] = config.multiprocessing_context
+        return DataLoader(dataset, **kwargs)
+
     def _cleanup_dataloader(self, loader):
         if loader is not None:
             if hasattr(loader, '_iterator'):
@@ -66,16 +77,13 @@ class CTCTrainer(BaseTrainer):
     def _rebuild_dataloaders(self):
         self._cleanup_dataloader(self.train_loader)
         self._cleanup_dataloader(self.val_loader)
-        self.train_loader = DataLoader(self.train_set, batch_size=config.batch_size, shuffle=True,
-                                       num_workers=config.num_workers, pin_memory=config.pin_memory,
-                                       persistent_workers=config.num_workers > 0,
-                                       drop_last=True, prefetch_factor=config.prefetch_factor,
-                                       collate_fn=ctc_collate_fn)
+        self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
+                                              shuffle=True, drop_last=True,
+                                              collate_fn=ctc_collate_fn)
         if self.val_loader is not None:
-            self.val_loader = DataLoader(self.val_set, batch_size=config.eval_batch_size,
-                                         num_workers=config.num_workers, pin_memory=config.pin_memory, drop_last=False,
-                                         persistent_workers=config.num_workers > 0, prefetch_factor=config.prefetch_factor,
-                                         collate_fn=ctc_collate_fn)
+            self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
+                                                shuffle=False, drop_last=False,
+                                                collate_fn=ctc_collate_fn)
 
     def _train_epoch(self, epoch):
         self.model.train()
@@ -161,11 +169,10 @@ class CTCTrainer(BaseTrainer):
                                 eval_bs = max(eval_bs // 2, 16)
                                 self.logger.logger.warning(
                                     f'[OOM-EVAL] Reducing eval_batch_size to {eval_bs} (attempt {attempt + 1})')
-                                self.val_loader = DataLoader(
+                                self.val_loader = self._make_loader(
                                     self.val_set, batch_size=eval_bs,
-                                    num_workers=config.num_workers, pin_memory=config.pin_memory,
-                                    drop_last=False, persistent_workers=config.num_workers > 0,
-                                    prefetch_factor=config.prefetch_factor, collate_fn=ctc_collate_fn)
+                                    shuffle=False, drop_last=False,
+                                    collate_fn=ctc_collate_fn)
                             break
                         raise
             if oom_hit:

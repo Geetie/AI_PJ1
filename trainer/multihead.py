@@ -47,18 +47,13 @@ class MultiHeadTrainer(BaseTrainer):
         self._model_type = model_type or config.model_type
         self.train_set = DigitsDataset(mode='train', aug=True,
                                        input_size=(config.input_height, config.input_width))
-        self.train_loader = DataLoader(self.train_set, batch_size=config.batch_size, shuffle=True,
-                                       num_workers=config.num_workers, pin_memory=config.pin_memory,
-                                       persistent_workers=config.num_workers > 0,
-                                       drop_last=True,
-                                       prefetch_factor=config.prefetch_factor)
+        self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
+                                              shuffle=True, drop_last=True)
         if val:
             self.val_set = DigitsDataset(mode='val', aug=False,
                                          input_size=(config.input_height, config.input_width))
-            self.val_loader = DataLoader(self.val_set, batch_size=config.eval_batch_size,
-                                         num_workers=config.num_workers, pin_memory=config.pin_memory, drop_last=False,
-                                         persistent_workers=config.num_workers > 0,
-                                         prefetch_factor=config.prefetch_factor)
+            self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
+                                                shuffle=False, drop_last=False)
         else:
             self.val_loader = None
 
@@ -114,6 +109,18 @@ class MultiHeadTrainer(BaseTrainer):
         print(f'   Class 10 (empty) weight: {class_weights[10].item():.3f}')
         return class_weights
 
+    def _make_loader(self, dataset, batch_size, shuffle=False, drop_last=False):
+        kwargs = dict(
+            batch_size=batch_size, shuffle=shuffle,
+            num_workers=config.num_workers, pin_memory=config.pin_memory,
+            drop_last=drop_last, prefetch_factor=config.prefetch_factor,
+        )
+        if config.num_workers > 0:
+            kwargs['persistent_workers'] = config.persistent_workers
+        if config.multiprocessing_context is not None:
+            kwargs['multiprocessing_context'] = config.multiprocessing_context
+        return DataLoader(dataset, **kwargs)
+
     def _pre_epoch_hook(self, epoch):
         if hasattr(self.model, 'set_roi_gt_prob'):
             if epoch < config.warmup_epochs:
@@ -138,14 +145,11 @@ class MultiHeadTrainer(BaseTrainer):
     def _rebuild_dataloaders(self):
         self._cleanup_dataloader(self.train_loader)
         self._cleanup_dataloader(self.val_loader)
-        self.train_loader = DataLoader(self.train_set, batch_size=config.batch_size, shuffle=True,
-                                       num_workers=config.num_workers, pin_memory=config.pin_memory,
-                                       persistent_workers=config.num_workers > 0,
-                                       drop_last=True, prefetch_factor=config.prefetch_factor)
+        self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
+                                              shuffle=True, drop_last=True)
         if self.val_loader is not None:
-            self.val_loader = DataLoader(self.val_set, batch_size=config.eval_batch_size,
-                                         num_workers=config.num_workers, pin_memory=config.pin_memory, drop_last=False,
-                                         persistent_workers=config.num_workers > 0, prefetch_factor=config.prefetch_factor)
+            self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
+                                                shuffle=False, drop_last=False)
 
     def _train_epoch(self, epoch):
         total_loss = 0
@@ -321,11 +325,9 @@ class MultiHeadTrainer(BaseTrainer):
                                 eval_bs = max(eval_bs // 2, 16)
                                 self.logger.logger.warning(
                                     f'[OOM-EVAL] Reducing eval_batch_size to {eval_bs} (attempt {attempt + 1})')
-                                self.val_loader = DataLoader(
-                                    self.val_set, batch_size=eval_bs,
-                                    num_workers=config.num_workers, pin_memory=config.pin_memory,
-                                    drop_last=False, persistent_workers=config.num_workers > 0,
-                                    prefetch_factor=config.prefetch_factor)
+                                self.val_loader = self._make_loader(
+                                self.val_set, batch_size=eval_bs,
+                                shuffle=False, drop_last=False)
                             break
                         raise
             if oom_hit:
@@ -404,9 +406,8 @@ class MultiHeadTrainer(BaseTrainer):
         for tta_size in config.tta_sizes:
             val_set_tta = DigitsDataset(mode='val', aug=False,
                                         input_size=(tta_size, tta_size))
-            val_loader_tta = DataLoader(val_set_tta, batch_size=config.eval_batch_size,
-                                        num_workers=config.num_workers, pin_memory=config.pin_memory, drop_last=False,
-                                        persistent_workers=False)
+            val_loader_tta = self._make_loader(val_set_tta, batch_size=config.eval_batch_size,
+                                               shuffle=False, drop_last=False)
             sample_idx = 0
             with t.no_grad():
                 for img, label, _, bbox_mask in tqdm(val_loader_tta, desc=f'TTA size={tta_size}'):

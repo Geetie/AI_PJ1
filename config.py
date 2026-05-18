@@ -12,15 +12,19 @@ IS_MODELSCOPE = os.path.exists('/mnt/workspace')
 def _detect_gpu_platform():
     if not t.cuda.is_available():
         return 'cpu'
+    if hasattr(t.version, 'hip') and t.version.hip is not None:
+        return 'amd_rocm'
     try:
         props = t.cuda.get_device_properties(0)
         gpu_name = props.name.lower()
-        if 'amd' in gpu_name or 'radeon' in gpu_name:
+        vram = getattr(props, 'total_mem', getattr(props, 'total_memory', 0)) / (1024 ** 3)
+        if 'amd' in gpu_name or 'radeon' in gpu_name or 'instinct' in gpu_name or 'mi2' in gpu_name:
             return 'amd_rocm'
-        else:
-            return 'nvidia_cuda'
+        if not gpu_name.strip() and vram > 100:
+            return 'amd_rocm'
     except Exception:
-        return 'nvidia_cuda'
+        pass
+    return 'nvidia_cuda'
 
 
 def _get_total_vram_gb():
@@ -43,6 +47,8 @@ class GPUProfile:
     eval_batch_size = 64
     num_workers = 4
     prefetch_factor = 2
+    persistent_workers = True
+    multiprocessing_context = None
     input_height = 384
     input_width = 384
     resize_size = 416
@@ -145,6 +151,8 @@ class AMDLargeProfile(GPUProfile):
     eval_batch_size = 384
     num_workers = 16
     prefetch_factor = 4
+    persistent_workers = False
+    multiprocessing_context = 'forkserver'
     input_height = 416
     input_width = 416
     resize_size = 448
@@ -299,6 +307,8 @@ class Config:
     prefetch_factor = ACTIVE_PROFILE.prefetch_factor
     num_workers = ACTIVE_PROFILE.num_workers
     use_gradient_checkpoint = ACTIVE_PROFILE.use_gradient_checkpoint
+    persistent_workers = ACTIVE_PROFILE.persistent_workers
+    multiprocessing_context = ACTIVE_PROFILE.multiprocessing_context
 
 
 config = Config()
@@ -316,6 +326,22 @@ data_dir = {
 }
 
 t.hub.set_dir(os.path.join(BASE_DIR, 'torch_hub'))
+
+
+def make_dataloader(dataset, batch_size, shuffle=False, drop_last=False, collate_fn=None):
+    from torch.utils.data import DataLoader
+    kwargs = dict(
+        batch_size=batch_size, shuffle=shuffle,
+        num_workers=config.num_workers, pin_memory=config.pin_memory,
+        drop_last=drop_last, prefetch_factor=config.prefetch_factor,
+    )
+    if collate_fn is not None:
+        kwargs['collate_fn'] = collate_fn
+    if config.num_workers > 0:
+        kwargs['persistent_workers'] = config.persistent_workers
+    if config.multiprocessing_context is not None:
+        kwargs['multiprocessing_context'] = config.multiprocessing_context
+    return DataLoader(dataset, **kwargs)
 
 
 def print_env_info():
