@@ -287,8 +287,6 @@ class MultiHeadTrainer(BaseTrainer):
                     joint_corrects * 100 / max(joint_total, 1)))
 
                 del img, label, pred_cls
-        if self.ema is not None:
-            self.ema.to_device('cpu')
         t.cuda.empty_cache()
         self.model.train()
 
@@ -343,9 +341,6 @@ class MultiHeadTrainer(BaseTrainer):
 
                 del img, label, pred_cls
 
-        if self.ema is not None:
-            self.ema.to_device('cpu')
-
         for h in range(config.num_heads):
             if head_totals[h] > 0:
                 print(f'  Head {h+1} Char Acc: {head_corrects[h] / head_totals[h] * 100:.2f}% ({head_corrects[h]}/{head_totals[h]})')
@@ -391,9 +386,6 @@ class MultiHeadTrainer(BaseTrainer):
                     sample_idx += bs
                     del img, probs
                 t.cuda.empty_cache()
-
-        if self.ema is not None:
-            self.ema.to_device('cpu')
 
         pred_heads = t.stack([all_probs[h].argmax(1) for h in range(config.num_heads)], dim=1)
         if config.use_char_level_acc:

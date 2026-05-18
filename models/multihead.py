@@ -205,15 +205,8 @@ class DigitsResnet101(nn.Module):
             self._extract_roi_feat(feat, gt_bboxes[:, h, :] if use_gt else bbox_outs[h], h)
             for h in range(self.num_heads)
         )
-        if not self.training:
-            refined = []
-            for h in range(self.num_heads):
-                p_no_digit = F.softmax(cls_outs[h].detach(), dim=1)[:, 10:11]
-                gated_roi = roi_cls[h] * (1 - p_no_digit)
-                refined.append(cls_outs[h] + gated_roi)
-            return tuple(refined)
-        else:
-            return tuple(cls_outs[h] + roi_cls[h] for h in range(self.num_heads))
+        # 训练和验证时保持一致的逻辑
+        return tuple(cls_outs[h] + roi_cls[h] for h in range(self.num_heads))
 
     def set_roi_gt_prob(self, prob):
         self.roi_gt_prob = prob

@@ -123,26 +123,29 @@ class TrainingLogger:
 
 class ModelEMA:
     def __init__(self, model, decay=0.999, device='cuda'):
-        self.ema = copy.deepcopy(model).to('cpu')
+        self.device = device
+        self.ema = copy.deepcopy(model).to(device)
         self.ema.eval()
         self.decay = decay
-        self.device = device
         for p in self.ema.parameters():
             p.requires_grad_(False)
 
     def update(self, model):
         with t.no_grad():
             for ema_p, model_p in zip(self.ema.parameters(), model.parameters()):
-                ema_p.data.mul_(self.decay).add_(model_p.data.to('cpu'), alpha=1 - self.decay)
+                ema_p.data.mul_(self.decay).add_(model_p.data.to(self.device), alpha=1 - self.decay)
 
     def to_device(self, device=None):
         target_device = device or self.device
-        self.ema = self.ema.to(target_device)
+        if target_device != self.device:
+            self.ema = self.ema.to(target_device)
+            self.device = target_device
         return self.ema
 
     def __getattr__(self, name):
-        if name == 'ema':
-            return self.ema
+        # 优先访问 ModelEMA 自身的属性
+        if name in self.__dict__:
+            return self.__dict__[name]
         return getattr(self.ema, name)
 
 
