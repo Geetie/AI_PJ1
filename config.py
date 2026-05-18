@@ -189,7 +189,7 @@ class GPUProfile:
     max_checkpoints = 3
     pin_memory = True
     tta_sizes = [288, 320, 352, 384, 416]
-    lr = 3e-3
+    lr = 1e-3
     backbone_lr_factor = 0.1
     warmup_epochs = 5
     dropout = 0.2
@@ -234,21 +234,22 @@ class CPUProfile(GPUProfile):
 
 class A100Profile(GPUProfile):
     platform = 'nvidia_cuda'
-    batch_size = 64
-    eval_batch_size = 96
+    batch_size = 96
+    eval_batch_size = 128
     num_workers = 6
     prefetch_factor = 2
-    input_height = 384
-    input_width = 384
-    resize_size = 416
+    input_height = 416
+    input_width = 416
+    resize_size = 448
     fc_hidden = 1024
-    grad_accum_steps = 2
-    use_torch_compile = False
+    grad_accum_steps = 1
+    use_torch_compile = True
     compile_mode = 'default'
+    compile_dynamic = False
     oom_headroom_ratio = 0.15
     max_checkpoints = 3
     pin_memory = True
-    tta_sizes = [288, 320, 352, 384, 416]
+    tta_sizes = [384, 416]
     lr = 3e-3
     backbone_lr_factor = 0.1
     warmup_epochs = 5
