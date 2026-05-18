@@ -228,8 +228,9 @@ class MultiHeadTrainer(BaseTrainer):
                 head_correct = [(pred[h].argmax(1) == label[:, h]) for h in range(config.num_heads)]
                 temp = t.stack(head_correct, dim=1)
                 valid_head_mask = t.stack([(true_lengths > h).float() for h in range(config.num_heads)], dim=1)
-                masked_correct = temp.float() * valid_head_mask + (1 - valid_head_mask)
-                corrects += t.all(masked_correct >= 1.0, dim=1).sum().item()
+                # For each sample, all valid heads must be correct
+                correct_mask = (temp | (valid_head_mask == 0))
+                corrects += t.all(correct_mask, dim=1).sum().item()
                 tbar.set_description(
                     'Epoch %d, loss: %.3f, joint_acc: %.3f' % (epoch + 1, total_loss / (i + 1), corrects * 100 / max(total, 1)))
             if (i + 1) % config.print_interval == 0:
@@ -276,8 +277,9 @@ class MultiHeadTrainer(BaseTrainer):
                 head_correct = [(pred_cls[h].argmax(1) == label[:, h]) for h in range(config.num_heads)]
                 temp = t.stack(head_correct, dim=1)
                 valid_head_mask = t.stack([(true_lengths > h).float() for h in range(config.num_heads)], dim=1)
-                masked_correct = temp.float() * valid_head_mask + (1 - valid_head_mask)
-                joint_corrects += t.all(masked_correct >= 1.0, dim=1).sum().item()
+                # For each sample, all valid heads must be correct
+                correct_mask = (temp | (valid_head_mask == 0))
+                joint_corrects += t.all(correct_mask, dim=1).sum().item()
                 joint_total += img.size(0)
 
                 tbar.set_description('Val Char: %.2f%% Joint: %.2f%%' % (
@@ -334,8 +336,9 @@ class MultiHeadTrainer(BaseTrainer):
                 head_correct = [(pred_cls[h].argmax(1) == label[:, h]) for h in range(config.num_heads)]
                 temp = t.stack(head_correct, dim=1)
                 valid_head_mask = t.stack([(true_lengths > h).float() for h in range(config.num_heads)], dim=1)
-                masked_correct = temp.float() * valid_head_mask + (1 - valid_head_mask)
-                joint_corrects += t.all(masked_correct >= 1.0, dim=1).sum().item()
+                # For each sample, all valid heads must be correct
+                correct_mask = (temp | (valid_head_mask == 0))
+                joint_corrects += t.all(correct_mask, dim=1).sum().item()
                 joint_total += img.size(0)
 
                 del img, label, pred_cls
