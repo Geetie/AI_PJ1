@@ -11,3 +11,7 @@ __pycache__/
 .ipynb_checkpoints/
 result*.csv
 .trae/
+tests/
+.coverage
+coverage.xml
+scripts/audit_results/

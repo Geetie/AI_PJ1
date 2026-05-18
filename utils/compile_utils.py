@@ -430,17 +430,17 @@ def _run_warmup(model, device, input_shapes, forward_fn, num_steps, use_amp):
     for shape_idx, shape_info in enumerate(input_shapes):
         bs, h, w = shape_info
         dummy = t.randn(bs, 3, h, w, device=device)
-        dtype = device if isinstance(device, t.device) else t.device(device)
+        torch_device = device if isinstance(device, t.device) else t.device(device)
 
         for step in range(num_steps):
             step_start = time.time()
             is_first = (shape_idx == 0 and step == 0)
             try:
                 if forward_fn is not None:
-                    with autocast(dtype.type, enabled=use_amp):
+                    with autocast(torch_device.type, enabled=use_amp):
                         forward_fn(model, dummy)
                 else:
-                    with t.no_grad(), autocast(dtype.type, enabled=use_amp):
+                    with t.no_grad(), autocast(torch_device.type, enabled=use_amp):
                         _ = model(dummy)
                 step_latency = time.time() - step_start
                 logger.log_warmup_shape(
@@ -513,12 +513,12 @@ def measure_compile_performance(model, device, input_shape, num_warmup=3, num_it
 
     results = {}
     bs, h, w = input_shape
-    dtype = device if isinstance(device, t.device) else t.device(device)
+    torch_device = device if isinstance(device, t.device) else t.device(device)
 
     dummy = t.randn(bs, 3, h, w, device=device)
 
     t0 = time.time()
-    with t.no_grad(), autocast(dtype.type, enabled=use_amp):
+    with t.no_grad(), autocast(torch_device.type, enabled=use_amp):
         if forward_fn:
             forward_fn(model, dummy)
         else:
@@ -528,7 +528,7 @@ def measure_compile_performance(model, device, input_shape, num_warmup=3, num_it
     results['first_latency_s'] = first_latency
 
     for _ in range(num_warmup):
-        with t.no_grad(), autocast(dtype.type, enabled=use_amp):
+        with t.no_grad(), autocast(torch_device.type, enabled=use_amp):
             if forward_fn:
                 forward_fn(model, dummy)
             else:
@@ -538,7 +538,7 @@ def measure_compile_performance(model, device, input_shape, num_warmup=3, num_it
     latencies = []
     for _ in range(num_iters):
         t0 = time.time()
-        with t.no_grad(), autocast(dtype.type, enabled=use_amp):
+        with t.no_grad(), autocast(torch_device.type, enabled=use_amp):
             if forward_fn:
                 forward_fn(model, dummy)
             else:
