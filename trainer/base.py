@@ -3,6 +3,7 @@ import copy
 import time
 import logging
 import psutil
+import signal
 import torch as t
 from tqdm.auto import tqdm
 from torch.optim import SGD
@@ -168,6 +169,13 @@ class BaseTrainer:
         self._stable_batch_size = None
         self._stable_epoch_count = 0
         self._min_stable_epochs_for_recovery = 3
+        self._pending_save = False
+        
+        signal.signal(signal.SIGUSR1, self._handle_save_signal)
+
+    def _handle_save_signal(self, signum, frame):
+        print(f"\n[EMERGENCY] Received SIGUSR1 signal, will save checkpoint after current batch...")
+        self._pending_save = True
 
     def _setup_optimizer(self, backbone_params, other_params):
         return SGD([
@@ -259,7 +267,7 @@ class BaseTrainer:
             self.lr_scheduler.step()
             current_lr = self.optimizer.param_groups[0]['lr']
 
-            if (epoch + 1) % config.eval_interval == 0:
+            if (epoch + 1) % config.eval_interval == 0 or self._pending_save:
                 acc = 0.0
                 if self.val_loader is not None:
                     acc = self._eval()
@@ -272,20 +280,19 @@ class BaseTrainer:
                 })
                 self._check_early_stopping(acc, epoch)
                 self.logger.log_epoch_end(epoch, train_acc, acc * 100, current_lr, is_best, self.patience_counter)
+                os.makedirs(config.checkpoints, exist_ok=True)
+                save_path = os.path.join(config.checkpoints,
+                                         'epoch-%s-%d-acc-%.2f.pth' % (self._checkpoint_prefix, epoch + 1, acc * 100))
+                self.save_model(save_path, save_opt=True)
+                self.logger.log_save(save_path)
+                
                 if is_best:
-                    os.makedirs(config.checkpoints, exist_ok=True)
-                    save_path = os.path.join(config.checkpoints,
-                                             'epoch-%s-%d-acc-%.2f.pth' % (self._checkpoint_prefix, epoch + 1, acc * 100))
-                    self.save_model(save_path, save_opt=True)
-                    self.logger.log_save(save_path)
                     self.best_acc = acc
                     self.best_checkpoint_path = save_path
-                elif (epoch + 1) % 10 == 0:
-                    os.makedirs(config.checkpoints, exist_ok=True)
-                    save_path = os.path.join(config.checkpoints,
-                                             'epoch-%s-%d-acc-%.2f.pth' % (self._checkpoint_prefix, epoch + 1, acc * 100))
-                    self.save_model(save_path, save_opt=True)
-                    self.logger.log_save(save_path)
+                
+                if self._pending_save:
+                    print(f"[EMERGENCY] Emergency save completed for epoch {epoch + 1}")
+                    self._pending_save = False
 
     def save_model(self, save_path, save_opt=False, save_config=False):
         if self.ema is not None:
