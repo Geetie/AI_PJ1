@@ -234,20 +234,20 @@ class CPUProfile(GPUProfile):
 
 class A100Profile(GPUProfile):
     platform = 'nvidia_cuda'
-    batch_size = 96
-    eval_batch_size = 128
+    batch_size = 48
+    eval_batch_size = 80
     num_workers = 6
     prefetch_factor = 2
-    input_height = 416
-    input_width = 416
-    resize_size = 448
+    input_height = 384
+    input_width = 384
+    resize_size = 416
     fc_hidden = 1024
-    grad_accum_steps = 1
+    grad_accum_steps = 2
     use_torch_compile = True
     compile_mode = 'default'
     compile_dynamic = False
-    use_gradient_checkpoint = False
-    oom_headroom_ratio = 0.10
+    use_gradient_checkpoint = True
+    oom_headroom_ratio = 0.15
     max_checkpoints = 3
     pin_memory = True
     tta_sizes = [384, 416]
