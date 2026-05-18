@@ -68,12 +68,11 @@ class MultiHeadTrainer(BaseTrainer):
 
         if config.pretrained is not None:
             self.load_model(config.pretrained, save_opt=False)
-            acc = 0.0
-            if self.val_loader is not None:
-                acc = self._eval()
-            self.best_acc = acc
-            print('Load model from %s, Eval Acc: %.2f' % (config.pretrained, acc * 100))
+            print(f'Load model from {config.pretrained}')
             print('Warning: Optimizer and scheduler NOT restored. Using new config.')
+            if 'best_acc' in t.load(config.pretrained, map_location='cpu', weights_only=False):
+                self.best_acc = t.load(config.pretrained, map_location='cpu', weights_only=False)['best_acc']
+                print(f'Restored best_acc: {self.best_acc * 100:.2f}%')
 
     def _compute_class_weights(self):
         class_counts = t.zeros(config.class_num)
@@ -226,8 +225,11 @@ class MultiHeadTrainer(BaseTrainer):
                 tbar.set_description(
                     'Epoch %d, loss: %.3f, char_acc: %.3f' % (epoch + 1, total_loss / (i + 1), corrects * 100 / max(total_chars, 1)))
             else:
-                temp = t.stack([pred[h].argmax(1) == label[:, h] for h in range(config.num_heads)], dim=1)
-                corrects += t.all(temp, dim=1).sum().item()
+                head_correct = [(pred[h].argmax(1) == label[:, h]) for h in range(config.num_heads)]
+                temp = t.stack(head_correct, dim=1)
+                valid_head_mask = t.stack([(true_lengths > h).float() for h in range(config.num_heads)], dim=1)
+                masked_correct = temp.float() * valid_head_mask + (1 - valid_head_mask)
+                corrects += t.all(masked_correct >= 1.0, dim=1).sum().item()
                 tbar.set_description(
                     'Epoch %d, loss: %.3f, joint_acc: %.3f' % (epoch + 1, total_loss / (i + 1), corrects * 100 / max(total, 1)))
             if (i + 1) % config.print_interval == 0:
@@ -248,7 +250,7 @@ class MultiHeadTrainer(BaseTrainer):
 
     def _eval(self):
         if self.ema is not None:
-            model = self.ema.ema
+            model = self.ema.to_device(self.device)
         else:
             model = self.model
         model.eval()
@@ -271,8 +273,11 @@ class MultiHeadTrainer(BaseTrainer):
                         char_corrects += ((pred_cls[h].argmax(1) == label[:, h]) * valid_mask).sum().item()
                 total_chars += true_lengths.sum().item()
 
-                temp = t.stack([pred_cls[h].argmax(1) == label[:, h] for h in range(config.num_heads)], dim=1)
-                joint_corrects += t.all(temp, dim=1).sum().item()
+                head_correct = [(pred_cls[h].argmax(1) == label[:, h]) for h in range(config.num_heads)]
+                temp = t.stack(head_correct, dim=1)
+                valid_head_mask = t.stack([(true_lengths > h).float() for h in range(config.num_heads)], dim=1)
+                masked_correct = temp.float() * valid_head_mask + (1 - valid_head_mask)
+                joint_corrects += t.all(masked_correct >= 1.0, dim=1).sum().item()
                 joint_total += img.size(0)
 
                 tbar.set_description('Val Char: %.2f%% Joint: %.2f%%' % (
@@ -280,6 +285,8 @@ class MultiHeadTrainer(BaseTrainer):
                     joint_corrects * 100 / max(joint_total, 1)))
 
                 del img, label, pred_cls
+        if self.ema is not None:
+            self.ema.to_device('cpu')
         t.cuda.empty_cache()
         self.model.train()
 
@@ -294,7 +301,7 @@ class MultiHeadTrainer(BaseTrainer):
 
     def eval_detailed(self):
         if self.ema is not None:
-            model = self.ema.ema
+            model = self.ema.to_device(self.device)
         else:
             model = self.model
         model.eval()
@@ -324,11 +331,17 @@ class MultiHeadTrainer(BaseTrainer):
                         char_corrects += ((pred_cls[h].argmax(1) == label[:, h]) * valid_mask).sum().item()
                 total_chars += true_lengths.sum().item()
 
-                temp = t.stack([pred_cls[h].argmax(1) == label[:, h] for h in range(config.num_heads)], dim=1)
-                joint_corrects += t.all(temp, dim=1).sum().item()
+                head_correct = [(pred_cls[h].argmax(1) == label[:, h]) for h in range(config.num_heads)]
+                temp = t.stack(head_correct, dim=1)
+                valid_head_mask = t.stack([(true_lengths > h).float() for h in range(config.num_heads)], dim=1)
+                masked_correct = temp.float() * valid_head_mask + (1 - valid_head_mask)
+                joint_corrects += t.all(masked_correct >= 1.0, dim=1).sum().item()
                 joint_total += img.size(0)
 
                 del img, label, pred_cls
+
+        if self.ema is not None:
+            self.ema.to_device('cpu')
 
         for h in range(config.num_heads):
             if head_totals[h] > 0:
@@ -348,7 +361,7 @@ class MultiHeadTrainer(BaseTrainer):
 
     def eval_tta(self):
         if self.ema is not None:
-            model = self.ema.ema
+            model = self.ema.to_device(self.device)
         else:
             model = self.model
         model.eval()
@@ -375,6 +388,9 @@ class MultiHeadTrainer(BaseTrainer):
                     sample_idx += bs
                     del img, probs
                 t.cuda.empty_cache()
+
+        if self.ema is not None:
+            self.ema.to_device('cpu')
 
         pred_heads = t.stack([all_probs[h].argmax(1) for h in range(config.num_heads)], dim=1)
         if config.use_char_level_acc:

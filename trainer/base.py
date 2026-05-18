@@ -122,17 +122,28 @@ class TrainingLogger:
 
 
 class ModelEMA:
-    def __init__(self, model, decay=0.999):
-        self.ema = copy.deepcopy(model)
+    def __init__(self, model, decay=0.999, device='cuda'):
+        self.ema = copy.deepcopy(model).to('cpu')
         self.ema.eval()
         self.decay = decay
+        self.device = device
         for p in self.ema.parameters():
             p.requires_grad_(False)
 
     def update(self, model):
         with t.no_grad():
             for ema_p, model_p in zip(self.ema.parameters(), model.parameters()):
-                ema_p.data.mul_(self.decay).add_(model_p.data, alpha=1 - self.decay)
+                ema_p.data.mul_(self.decay).add_(model_p.data.to('cpu'), alpha=1 - self.decay)
+
+    def to_device(self, device=None):
+        target_device = device or self.device
+        self.ema = self.ema.to(target_device)
+        return self.ema
+
+    def __getattr__(self, name):
+        if name == 'ema':
+            return self.ema
+        return getattr(self.ema, name)
 
 
 class BaseTrainer:
@@ -152,6 +163,8 @@ class BaseTrainer:
         self._oom_retry_count = 0
         self._original_batch_size = config.batch_size
         self._stable_batch_size = None
+        self._stable_epoch_count = 0
+        self._min_stable_epochs_for_recovery = 3
 
     def _setup_optimizer(self, backbone_params, other_params):
         return SGD([
@@ -220,18 +233,26 @@ class BaseTrainer:
                 else:
                     raise
             self._oom_retry_count = 0
+            self._stable_epoch_count += 1
             if self._stable_batch_size is None:
                 self._stable_batch_size = config.batch_size
+                self._stable_epoch_count = 0
                 self.logger.logger.info(f'[STABLE] batch_size={config.batch_size} confirmed stable')
             if config.batch_size < self._stable_batch_size:
-                new_bs = min(config.batch_size + 8, self._stable_batch_size)
-                if new_bs != config.batch_size:
-                    config.batch_size = new_bs
-                    config.grad_accum_steps = max(self._original_batch_size // config.batch_size, 1)
+                if self._stable_epoch_count >= self._min_stable_epochs_for_recovery:
+                    new_bs = min(config.batch_size + 8, self._stable_batch_size)
+                    if new_bs != config.batch_size:
+                        config.batch_size = new_bs
+                        config.grad_accum_steps = max(self._original_batch_size // config.batch_size, 1)
+                        self._stable_epoch_count = 0
+                        self.logger.logger.info(
+                            f'[RECOVER] Increasing batch_size to {config.batch_size}, '
+                            f'grad_accum_steps={config.grad_accum_steps}')
+                        self._rebuild_dataloaders()
+                else:
                     self.logger.logger.info(
-                        f'[RECOVER] Increasing batch_size to {config.batch_size}, '
-                        f'grad_accum_steps={config.grad_accum_steps}')
-                    self._rebuild_dataloaders()
+                        f'[WAIT] Waiting {self._min_stable_epochs_for_recovery - self._stable_epoch_count} more stable epochs before batch_size recovery')
+
             self.lr_scheduler.step()
             current_lr = self.optimizer.param_groups[0]['lr']
 

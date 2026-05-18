@@ -15,28 +15,30 @@ NUM_HEADS = 6
 
 def _auto_batch_size():
     if not t.cuda.is_available():
-        return 64
+        return 32
     try:
         props = t.cuda.get_device_properties(0)
         total_vram_mb = getattr(props, 'total_mem', getattr(props, 'total_memory', 0)) / (1024 * 1024)
     except RuntimeError:
-        return 128
+        return 32
     if total_vram_mb >= 45000:
         return 96
     elif total_vram_mb >= 24000:
         return 64
-    elif total_vram_mb >= 22000:
-        return 48
+    elif total_vram_mb >= 20000:
+        return 32
     elif total_vram_mb >= 16000:
-        return 48
+        return 32
     elif total_vram_mb >= 8000:
-        return 64
-    return 32
+        return 16
+    elif total_vram_mb >= 4000:
+        return 8
+    return 8
 
 
 class Config:
     batch_size = _auto_batch_size()
-    lr = 2e-3
+    lr = 3e-3
     backbone_lr_factor = 0.1
     momentum = 0.9
     weights_decay = 5e-4
@@ -83,7 +85,7 @@ class Config:
     roi_gt_prob = 0.8
     num_attn_channels = 8
     use_char_level_acc = True
-    early_stopping_patience = 15
+    early_stopping_patience = 20
     aux_loss_weight = 0.3
     grad_accum_steps = 4
 

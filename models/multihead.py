@@ -189,7 +189,10 @@ class DigitsResnet101(nn.Module):
         batch_idx = t.arange(B, device=feat.device).float()
         boxes = t.stack([batch_idx, x1, y1, x2, y2], dim=1)
         roi_feat = roi_align(feat, boxes, output_size=7, spatial_scale=1.0)
-        roi_processed = self.roi_cnn[head_idx](roi_feat)
+        if self.training:
+            roi_processed = t.utils.checkpoint.checkpoint(self.roi_cnn[head_idx], roi_feat, use_reentrant=False)
+        else:
+            roi_processed = self.roi_cnn[head_idx](roi_feat)
         return self.roi_cls_heads[head_idx](roi_processed)
 
     def _apply_roi_refine(self, feat, cls_outs, bbox_outs, gt_bboxes=None):
@@ -242,7 +245,7 @@ class DigitsResnet101(nn.Module):
                     head, feat, True, use_reentrant=False)
             else:
                 cls_out, bbox_out, hidden, attn = head(feat, return_attn=True)
-            head_cls_outs.append(cls_out)
+            head_cls_outs.append(cls_out.detach() if self.training else cls_out)
             bbox_outs.append(bbox_out)
             head_feats.append(hidden)
             attn_maps.append(attn.detach() if self.training else attn)
