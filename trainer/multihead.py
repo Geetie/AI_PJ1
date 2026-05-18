@@ -109,6 +109,15 @@ class MultiHeadTrainer(BaseTrainer):
         if config.pretrained is not None:
             if 'best_acc' in ckpt:
                 self.best_acc = ckpt['best_acc']
+            import re
+            fname_acc = re.search(r'acc-([\d.]+)\.pth', config.pretrained)
+            if fname_acc:
+                fname_acc_val = float(fname_acc.group(1)) / 100.0
+                if fname_acc_val > self.best_acc:
+                    self.logger.logger.warning(f'Checkpoint filename acc={fname_acc_val*100:.2f}% > '
+                                              f'stored best_acc={self.best_acc*100:.2f}%. '
+                                              f'Correcting to filename value.')
+                    self.best_acc = fname_acc_val
             if 'epoch' in ckpt:
                 config.start_epoch = ckpt['epoch']
                 self._current_epoch = ckpt['epoch']
