@@ -251,16 +251,16 @@ class A100Profile(GPUProfile):
     max_checkpoints = 3
     pin_memory = True
     tta_sizes = [384, 416]
-    lr = 1.4e-3
+    lr = 4e-4
     backbone_lr_factor = 0.1
     warmup_epochs = 5
     dropout = 0.2
     ema_decay = 0.999
     aux_loss_weight = 0.3
-    bbox_loss_weight = 5.0
-    attn_diversity_weight = 0.1
-    attn_supervision_weight = 2.0
-    ordering_loss_weight = 1.6
+    bbox_loss_weight = 1.0
+    attn_diversity_weight = 0.5
+    attn_supervision_weight = 0.6
+    ordering_loss_weight = 1.2
     multiscale_feat_dim = 512
     pos_embed_channels = 64
     feat_spatial_size = 40
@@ -273,7 +273,7 @@ class A100Profile(GPUProfile):
     cutmix_prob = 0.5
     erase_prob = 0.2
     smooth = 0.1
-    aug_rotation_degrees = 5
+    aug_rotation_degrees = 3
     aug_blur_prob = 0.15
     roi_gt_prob = 0.8
 

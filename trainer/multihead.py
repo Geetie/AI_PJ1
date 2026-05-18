@@ -478,7 +478,7 @@ class MultiHeadTrainer(BaseTrainer):
                         if empty_mask.sum() > 0:
                             bbox_loss = bbox_loss + F.smooth_l1_loss(
                                 pred_bboxes[h][empty_mask], mean_bbox[empty_mask].detach()) * 0.3
-                loss = (cls_loss + config.bbox_loss_weight * bbox_loss
+                loss = (1.5 * cls_loss + config.bbox_loss_weight * bbox_loss
                         + config.attn_diversity_weight * div_loss
                         + config.ordering_loss_weight * ord_loss
                         + config.attn_supervision_weight * attn_sup_loss)
