@@ -149,8 +149,8 @@ class A100Profile(GPUProfile):
 class AMDLargeProfile(GPUProfile):
     batch_size = 256
     eval_batch_size = 384
-    num_workers = 16
-    prefetch_factor = 4
+    num_workers = 8
+    prefetch_factor = 2
     persistent_workers = False
     multiprocessing_context = 'forkserver'
     input_height = 416

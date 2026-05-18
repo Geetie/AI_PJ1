@@ -261,7 +261,8 @@ class BaseTrainer:
             try:
                 train_acc = self._train_epoch(epoch)
             except RuntimeError as e:
-                if 'out of memory' in str(e).lower() and self._oom_retry_count < 3:
+                err_msg = str(e).lower()
+                if 'out of memory' in err_msg and self._oom_retry_count < 3:
                     self._oom_retry_count += 1
                     old_bs = config.batch_size
                     t.cuda.empty_cache()
@@ -282,6 +283,15 @@ class BaseTrainer:
                         f'headroom={headroom:.1f}GB, '
                         f'grad_accum_steps={config.grad_accum_steps} (retry {self._oom_retry_count})')
                     t.cuda.reset_peak_memory_stats()
+                    self._cleanup_dataloader(self.train_loader)
+                    self._rebuild_dataloaders()
+                    continue
+                elif 'shared memory' in err_msg and config.num_workers > 0:
+                    config.num_workers = max(config.num_workers // 2, 0)
+                    config.prefetch_factor = max(config.prefetch_factor - 1, 1) if config.num_workers > 0 else None
+                    self.logger.logger.warning(
+                        f'[SHM] Shared memory error. Reducing num_workers to {config.num_workers}, '
+                        f'prefetch_factor to {config.prefetch_factor}')
                     self._cleanup_dataloader(self.train_loader)
                     self._rebuild_dataloaders()
                     continue
