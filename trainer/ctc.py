@@ -40,6 +40,12 @@ class CTCTrainer(BaseTrainer):
             self.val_loader = None
 
         self.model = CTCModel(num_classes=config.class_num).to(self.device)
+
+        if config.pretrained is not None:
+            ckpt = t.load(config.pretrained, map_location=self.device, weights_only=False)
+            self.model.load_state_dict(ckpt['model'], strict=False)
+            print(f'Load model from {config.pretrained}')
+
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
         self.criterion = nn.CTCLoss(blank=10, zero_infinity=True)
 
@@ -78,7 +84,13 @@ class CTCTrainer(BaseTrainer):
         self.logger.log_init(self._model_type, self.device, total_params, trainable_params)
 
         if config.pretrained is not None:
-            self.load_model(config.pretrained, save_opt=False)
+            if 'best_acc' in ckpt:
+                self.best_acc = ckpt['best_acc']
+            if 'epoch' in ckpt:
+                config.start_epoch = ckpt['epoch']
+                self._current_epoch = ckpt['epoch']
+            if 'train_log' in ckpt:
+                self.train_log = ckpt['train_log']
 
         self._gpu_warmup()
 
@@ -127,17 +139,10 @@ class CTCTrainer(BaseTrainer):
         compile_info = " (torch.compile)" if config.use_torch_compile else ""
         print(f'[WARMUP-CTC] Starting GPU warmup with bs={warmup_bs}{compile_info}...')
 
-        raw_model = get_raw_model(self.model)
-        saved_state = None
-        try:
-            saved_state = {k: v.clone() for k, v in raw_model.state_dict().items()}
-        except Exception:
-            saved_state = None
-
         warmup_start = time.time()
 
         try:
-            with self._compile_logger.phase('warmup_ctc_forward'):
+            with self._compile_logger.phase('warmup_ctc_inference'):
                 dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
                 with t.no_grad(), autocast(self.device.type, enabled=self.use_amp):
                     _ = self.model(dummy)
@@ -146,7 +151,7 @@ class CTCTrainer(BaseTrainer):
                 t.cuda.empty_cache()
             warmup_time = time.time() - warmup_start
             self._compile_logger.log_warmup_summary(warmup_time, 1, 1)
-            print(f'[WARMUP-CTC] Forward warmup completed')
+            print(f'[WARMUP-CTC] Inference warmup completed in {warmup_time:.1f}s')
         except RuntimeError as e:
             if 'out of memory' in str(e).lower():
                 t.cuda.empty_cache()
@@ -178,17 +183,6 @@ class CTCTrainer(BaseTrainer):
             else:
                 print(f'[WARMUP-CTC] GPU warmup failed: {e}')
                 t.cuda.empty_cache()
-
-        if saved_state is not None:
-            try:
-                raw_model.load_state_dict(saved_state)
-                if self.ema is not None:
-                    self.ema.ema.load_state_dict(saved_state)
-                del saved_state
-                t.cuda.empty_cache()
-                print(f'[WARMUP-CTC] Model weights restored after warmup')
-            except Exception:
-                del saved_state
 
         self._compile_logger.log_dynamo_stats()
 

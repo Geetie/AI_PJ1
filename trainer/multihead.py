@@ -66,8 +66,12 @@ class MultiHeadTrainer(BaseTrainer):
 
         self.model = create_model(self._model_type).to(self.device)
 
-        backbone_params = list(self.model.backbone.parameters())
-        other_params = [p for n, p in self.model.named_parameters() if not n.startswith('backbone.')]
+        if config.pretrained is not None:
+            ckpt = t.load(config.pretrained, map_location=self.device, weights_only=False)
+            self.model.load_state_dict(ckpt['model'], strict=False)
+            if 'model_type' in ckpt:
+                self._model_type = ckpt['model_type']
+            print(f'Load model from {config.pretrained}')
 
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
         self._compile_logger = CompileLogger.get_instance()
@@ -103,6 +107,9 @@ class MultiHeadTrainer(BaseTrainer):
         for h in range(config.num_heads):
             self.head_criteria.append(LabelSmoothEntropy(smooth=config.smooth, class_weights=class_weights))
 
+        backbone_params = list(get_raw_model(self.model).backbone.parameters())
+        other_params = [p for n, p in get_raw_model(self.model).named_parameters()
+                        if not n.startswith('backbone.')]
         self.optimizer = self._setup_optimizer(backbone_params, other_params)
         self.lr_scheduler = self._setup_scheduler()
         self.scaler = self._setup_scaler()
@@ -111,10 +118,15 @@ class MultiHeadTrainer(BaseTrainer):
         self.logger.log_init(self._model_type, self.device, total_params, trainable_params)
 
         if config.pretrained is not None:
-            self.load_model(config.pretrained, save_opt=False)
-            print(f'Load model from {config.pretrained}')
-            print('Warning: Optimizer and scheduler NOT restored. Using new config.')
+            if 'best_acc' in ckpt:
+                self.best_acc = ckpt['best_acc']
+            if 'epoch' in ckpt:
+                config.start_epoch = ckpt['epoch']
+                self._current_epoch = ckpt['epoch']
+            if 'train_log' in ckpt:
+                self.train_log = ckpt['train_log']
             print(f'Restored best_acc: {self.best_acc * 100:.2f}%')
+            print('Warning: Optimizer and scheduler NOT restored. Using new config.')
 
         self._gpu_warmup()
 
@@ -156,13 +168,6 @@ class MultiHeadTrainer(BaseTrainer):
             print(f'[WARMUP] Kernel compilation in progress (may take 5-15 min on first run)')
             print(f'[WARMUP] Subsequent runs will use cached kernels and be much faster')
 
-        raw_model = self._get_raw_model()
-        saved_state = None
-        try:
-            saved_state = {k: v.clone() for k, v in raw_model.state_dict().items()}
-        except Exception:
-            saved_state = None
-
         heartbeat_stop = threading.Event()
         warmup_start = time.time()
 
@@ -176,29 +181,18 @@ class MultiHeadTrainer(BaseTrainer):
         ht.start()
 
         try:
-            with self._compile_logger.phase('warmup_forward_backward'):
+            with self._compile_logger.phase('warmup_inference'):
                 dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
-                dummy_label = t.randint(0, config.class_num, (warmup_bs, config.num_heads), device=self.device)
-                dummy_bbox = t.rand(warmup_bs, config.num_heads, 4, device=self.device)
-
-                print(f'[WARMUP] Running forward+backward pass (bs={warmup_bs})...')
-                with autocast(self.device.type, enabled=self.use_amp):
-                    pred, pred_bboxes, attn_maps, head_cls_outs = self.model.forward_with_attn(dummy, gt_bboxes=dummy_bbox)
-                    cls_loss = sum(self.head_criteria[h](pred[h], dummy_label[:, h]) for h in range(config.num_heads))
-                    loss = cls_loss / config.grad_accum_steps
-
-                self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-                self.optimizer.zero_grad()
+                print(f'[WARMUP] Running inference pass (bs={warmup_bs})...')
+                with t.no_grad(), autocast(self.device.type, enabled=self.use_amp):
+                    _ = self.model(dummy)
                 t.cuda.synchronize()
-
-                del dummy, dummy_label, dummy_bbox, pred, pred_bboxes, attn_maps, head_cls_outs, loss
+                del dummy
                 t.cuda.empty_cache()
 
             warmup_time = time.time() - warmup_start
             self._compile_logger.log_warmup_summary(warmup_time, 1, 1)
-            print(f'[WARMUP] Primary warmup completed in {warmup_time:.1f}s (forward+backward with bs={warmup_bs})')
+            print(f'[WARMUP] Primary warmup completed in {warmup_time:.1f}s (inference with bs={warmup_bs})')
 
             if config.use_torch_compile:
                 with self._compile_logger.phase('warmup_tta_shapes'):
@@ -218,7 +212,7 @@ class MultiHeadTrainer(BaseTrainer):
                     t.cuda.empty_cache()
                     warmup_time = time.time() - warmup_start
                     self._compile_logger.log_warmup_summary(warmup_time, 1, 1)
-                    print(f'[WARMUP] Fallback warmup completed in {warmup_time:.1f}s (inference only with bs={warmup_bs})')
+                    print(f'[WARMUP] Fallback warmup completed in {warmup_time:.1f}s (inference with bs={warmup_bs})')
                 except Exception as e2:
                     print(f'[WARMUP] Fallback warmup also failed: {e2}')
                     t.cuda.empty_cache()
@@ -256,22 +250,6 @@ class MultiHeadTrainer(BaseTrainer):
         finally:
             heartbeat_stop.set()
             ht.join(timeout=5)
-
-        if saved_state is not None:
-            try:
-                raw_model.load_state_dict(saved_state)
-                if self.ema is not None:
-                    self.ema.ema.load_state_dict(saved_state)
-                del saved_state
-                t.cuda.empty_cache()
-                if config.use_torch_compile:
-                    try:
-                        t._dynamo.reset()
-                    except Exception:
-                        pass
-                print(f'[WARMUP] Model weights restored after warmup')
-            except Exception:
-                del saved_state
 
         self._compile_logger.log_dynamo_stats()
 

@@ -551,12 +551,53 @@ class TestConfidenceNormalization(unittest.TestCase):
         self.assertIn('norm_ctc', source)
 
 
-class TestWarmupDynamoReset(unittest.TestCase):
-    def test_warmup_resets_dynamo(self):
+class TestWarmupNoDynamoReset(unittest.TestCase):
+    def test_warmup_does_not_reset_dynamo(self):
         import inspect
         from trainer.multihead import MultiHeadTrainer
         source = inspect.getsource(MultiHeadTrainer._gpu_warmup)
-        self.assertIn('_dynamo.reset', source)
+        self.assertNotIn('_dynamo.reset', source)
+
+    def test_warmup_does_not_save_restore_weights(self):
+        import inspect
+        from trainer.multihead import MultiHeadTrainer
+        source = inspect.getsource(MultiHeadTrainer._gpu_warmup)
+        self.assertNotIn('saved_state', source)
+
+    def test_ctc_warmup_does_not_save_restore_weights(self):
+        import inspect
+        from trainer.ctc import CTCTrainer
+        source = inspect.getsource(CTCTrainer._gpu_warmup)
+        self.assertNotIn('saved_state', source)
+
+
+class TestInitExecutionOrder(unittest.TestCase):
+    def test_multihead_loads_weights_before_compile(self):
+        import inspect
+        from trainer.multihead import MultiHeadTrainer
+        source = inspect.getsource(MultiHeadTrainer.__init__)
+        pretrained_pos = source.find('config.pretrained')
+        compile_pos = source.find('try_compile_model')
+        self.assertLess(pretrained_pos, compile_pos,
+                        "pretrained weights should be loaded BEFORE torch.compile")
+
+    def test_multihead_creates_ema_after_load(self):
+        import inspect
+        from trainer.multihead import MultiHeadTrainer
+        source = inspect.getsource(MultiHeadTrainer.__init__)
+        pretrained_pos = source.find('config.pretrained')
+        ema_pos = source.find('ModelEMA')
+        self.assertLess(pretrained_pos, ema_pos,
+                        "EMA should be created AFTER pretrained weights are loaded")
+
+    def test_ctc_loads_weights_before_compile(self):
+        import inspect
+        from trainer.ctc import CTCTrainer
+        source = inspect.getsource(CTCTrainer.__init__)
+        pretrained_pos = source.find('config.pretrained')
+        compile_pos = source.find('try_compile_model')
+        self.assertLess(pretrained_pos, compile_pos,
+                        "pretrained weights should be loaded BEFORE torch.compile")
 
 
 class TestCompileFallbackRebuildsEMA(unittest.TestCase):
