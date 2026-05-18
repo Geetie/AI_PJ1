@@ -441,6 +441,8 @@ class BaseTrainer:
                 if is_best:
                     best_path = os.path.join(config.checkpoints,
                                              'best-%s-acc-%.2f.pth' % (self._checkpoint_prefix, acc * 100))
+                    self.best_acc = acc
+                    self.best_checkpoint_path = best_path
                     self.save_model(best_path, save_opt=True)
                     self.logger.log_save(best_path, save_type='best')
                     if self.best_checkpoint_path and os.path.exists(self.best_checkpoint_path):
@@ -453,8 +455,6 @@ class BaseTrainer:
                                 self.logger.logger.info(f'[CLEANUP] Removed old best: {old_best}')
                             except OSError:
                                 pass
-                    self.best_acc = acc
-                    self.best_checkpoint_path = best_path
 
                 if (epoch + 1) % config.checkpoint_interval == 0 or self._pending_save:
                     periodic_path = os.path.join(config.checkpoints,
