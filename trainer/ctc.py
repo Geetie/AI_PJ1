@@ -55,14 +55,18 @@ class CTCTrainer(BaseTrainer):
         kwargs = dict(
             batch_size=batch_size, shuffle=shuffle,
             num_workers=config.num_workers, pin_memory=config.pin_memory,
-            drop_last=drop_last, prefetch_factor=config.prefetch_factor,
+            drop_last=drop_last,
         )
+        if config.num_workers > 0:
+            kwargs['prefetch_factor'] = config.prefetch_factor
+            kwargs['persistent_workers'] = config.persistent_workers
+        if config.multiprocessing_context is not None and config.num_workers > 0:
+            kwargs['multiprocessing_context'] = config.multiprocessing_context
         if collate_fn is not None:
             kwargs['collate_fn'] = collate_fn
-        if config.num_workers > 0:
-            kwargs['persistent_workers'] = config.persistent_workers
-        if config.multiprocessing_context is not None:
-            kwargs['multiprocessing_context'] = config.multiprocessing_context
+        print(f'[DataLoader] batch={batch_size}, workers={config.num_workers}, '
+              f'pin_mem={config.pin_memory}, ctx={config.multiprocessing_context}, '
+              f'persistent={config.persistent_workers}, dataset={len(dataset)}')
         return DataLoader(dataset, **kwargs)
 
     def _cleanup_dataloader(self, loader):

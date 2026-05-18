@@ -149,10 +149,10 @@ class A100Profile(GPUProfile):
 class AMDLargeProfile(GPUProfile):
     batch_size = 256
     eval_batch_size = 384
-    num_workers = 4
-    prefetch_factor = 2
+    num_workers = 0
+    prefetch_factor = None
     persistent_workers = False
-    multiprocessing_context = 'forkserver'
+    multiprocessing_context = None
     input_height = 416
     input_width = 416
     resize_size = 448
@@ -357,14 +357,18 @@ def make_dataloader(dataset, batch_size, shuffle=False, drop_last=False, collate
     kwargs = dict(
         batch_size=batch_size, shuffle=shuffle,
         num_workers=config.num_workers, pin_memory=config.pin_memory,
-        drop_last=drop_last, prefetch_factor=config.prefetch_factor,
+        drop_last=drop_last,
     )
+    if config.num_workers > 0:
+        kwargs['prefetch_factor'] = config.prefetch_factor
+        kwargs['persistent_workers'] = config.persistent_workers
+    if config.multiprocessing_context is not None and config.num_workers > 0:
+        kwargs['multiprocessing_context'] = config.multiprocessing_context
     if collate_fn is not None:
         kwargs['collate_fn'] = collate_fn
-    if config.num_workers > 0:
-        kwargs['persistent_workers'] = config.persistent_workers
-    if config.multiprocessing_context is not None:
-        kwargs['multiprocessing_context'] = config.multiprocessing_context
+    print(f'[DataLoader] batch={batch_size}, workers={config.num_workers}, '
+          f'pin_mem={config.pin_memory}, ctx={config.multiprocessing_context}, '
+          f'persistent={config.persistent_workers}, dataset={len(dataset)}')
     return DataLoader(dataset, **kwargs)
 
 
