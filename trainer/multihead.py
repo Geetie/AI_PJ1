@@ -1,5 +1,4 @@
 import os
-import copy
 import gc
 import json
 import random
@@ -127,13 +126,15 @@ class MultiHeadTrainer(BaseTrainer):
 
     def _gpu_warmup(self):
         warmup_bs = config.batch_size
-        print(f'[WARMUP] Starting GPU warmup with bs={warmup_bs}...')
-        print(f'[WARMUP] MIOpen kernel compilation in progress (may take 3-10 min on first run)')
+        compile_info = " (MIOpen + torch.compile)" if config.use_torch_compile else " (MIOpen)"
+        print(f'[WARMUP] Starting GPU warmup with bs={warmup_bs}{compile_info}...')
+        print(f'[WARMUP] Kernel compilation in progress (may take 5-15 min on first run)')
         print(f'[WARMUP] Subsequent runs will use cached kernels and be much faster')
 
+        raw_model = self._get_raw_model()
         saved_state = None
         try:
-            saved_state = copy.deepcopy(self.model.state_dict())
+            saved_state = {k: v.clone() for k, v in raw_model.state_dict().items()}
         except Exception:
             saved_state = None
 
@@ -144,7 +145,7 @@ class MultiHeadTrainer(BaseTrainer):
             elapsed = 0
             while not heartbeat_stop.wait(30):
                 elapsed += 30
-                print(f'[WARMUP] Still compiling MIOpen kernels... ({elapsed}s elapsed, this is normal on first run)')
+                print(f'[WARMUP] Still compiling kernels... ({elapsed}s elapsed, this is normal on first run)')
 
         ht = threading.Thread(target=_heartbeat, daemon=True)
         ht.start()
@@ -198,15 +199,38 @@ class MultiHeadTrainer(BaseTrainer):
                 print(f'[WARMUP] GPU warmup failed: {e}')
                 t.cuda.empty_cache()
         except Exception as e:
-            print(f'[WARMUP] GPU warmup failed: {e}')
-            t.cuda.empty_cache()
+            err_str = str(e).lower()
+            if config.use_torch_compile and ('compile' in err_str or 'triton' in err_str or 'inductor' in err_str):
+                print(f'[WARMUP] torch.compile failed during warmup: {e}')
+                print(f'[WARMUP] Disabling torch.compile and falling back to eager mode')
+                config.use_torch_compile = False
+                raw_model = self._get_raw_model()
+                self.model = raw_model
+                t.cuda.empty_cache()
+                try:
+                    dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
+                    with t.no_grad():
+                        _ = self.model(dummy)
+                    t.cuda.synchronize()
+                    del dummy
+                    t.cuda.empty_cache()
+                    warmup_time = time.time() - warmup_start
+                    print(f'[WARMUP] Eager mode warmup completed in {warmup_time:.1f}s')
+                except Exception as e2:
+                    print(f'[WARMUP] Eager mode warmup also failed: {e2}')
+                    t.cuda.empty_cache()
+            else:
+                print(f'[WARMUP] GPU warmup failed: {e}')
+                t.cuda.empty_cache()
         finally:
             heartbeat_stop.set()
             ht.join(timeout=5)
 
         if saved_state is not None:
             try:
-                self.model.load_state_dict(saved_state)
+                raw_model.load_state_dict(saved_state)
+                if self.ema is not None:
+                    self.ema.ema.load_state_dict(saved_state)
                 del saved_state
                 t.cuda.empty_cache()
                 print(f'[WARMUP] Model weights restored after warmup')

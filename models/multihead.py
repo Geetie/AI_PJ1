@@ -175,6 +175,7 @@ class DigitsResnet101(nn.Module):
             nn.Linear(config.fc_hidden, class_num) for _ in range(num_heads)
         ])
 
+    @t.compiler.disable
     def _extract_roi_feat(self, feat, bbox_pred, head_idx):
         B, C, H, W = feat.shape
         cx, cy, bw, bh = bbox_pred[:, 0], bbox_pred[:, 1], bbox_pred[:, 2], bbox_pred[:, 3]
@@ -199,6 +200,7 @@ class DigitsResnet101(nn.Module):
             roi_processed = self.roi_cnn[head_idx](roi_feat)
         return self.roi_cls_heads[head_idx](roi_processed)
 
+    @t.compiler.disable
     def _apply_roi_refine(self, feat, cls_outs, bbox_outs, gt_bboxes=None):
         if not self.has_roi:
             return cls_outs

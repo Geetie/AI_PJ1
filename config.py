@@ -11,6 +11,7 @@ IS_MODELSCOPE = os.path.exists('/mnt/workspace')
 os.environ.setdefault('MIOPEN_DISABLE_CACHE', '0')
 os.environ.setdefault('MIOPEN_FIND_MODE', '2')
 os.environ.setdefault('MIOPEN_USER_DB_PATH', os.path.join(BASE_DIR, 'miopen_cache'))
+os.environ.setdefault('TRITON_CACHE_DIR', os.path.join(BASE_DIR, 'triton_cache'))
 
 
 def _detect_gpu_platform():
@@ -162,7 +163,7 @@ class AMDLargeProfile(GPUProfile):
     resize_size = 448
     fc_hidden = 1536
     grad_accum_steps = 1
-    use_torch_compile = False
+    use_torch_compile = True
     compile_mode = 'default'
     use_gradient_checkpoint = False
     oom_headroom_ratio = 0.10
