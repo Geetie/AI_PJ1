@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import torch as t
-from config import config, GPU_PLATFORM, TOTAL_VRAM_GB, NUM_PHYSICAL_CORES, NUM_WORKERS, print_env_info
+from config import config, GPU_PLATFORM, TOTAL_VRAM_GB, NUM_PHYSICAL_CORES, print_env_info
 
 
 def test_gpu_detection():
@@ -44,13 +44,13 @@ def test_config_parameters():
     print(f"Batch Size: {config.batch_size}")
     print(f"Gradient Accumulation Steps: {config.grad_accum_steps}")
     print(f"Equivalent Batch Size: {config.batch_size * config.grad_accum_steps}")
-    print(f"Data Loader Workers: {NUM_WORKERS}")
+    print(f"Data Loader Workers: {config.num_workers}")
     print(f"Use Torch Compile: {config.use_torch_compile}")
     print(f"Physical CPU Cores: {NUM_PHYSICAL_CORES}")
     
     assert config.batch_size > 0, "Batch size must be positive"
     assert config.grad_accum_steps >= 1, "Gradient accumulation steps must be >= 1"
-    assert NUM_WORKERS >= 0, "Workers must be non-negative"
+    assert config.num_workers >= 0, "Workers must be non-negative"
     print("✅ Configuration parameters valid")
     return True
 
@@ -183,7 +183,7 @@ def main():
         print(f"  - Batch Size: {config.batch_size}")
         print(f"  - Gradient Accumulation: {config.grad_accum_steps}")
         print(f"  - Equivalent Batch: {config.batch_size * config.grad_accum_steps}")
-        print(f"  - Data Loader Workers: {NUM_WORKERS}")
+        print(f"  - Data Loader Workers: {config.num_workers}")
 
 
 if __name__ == "__main__":

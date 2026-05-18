@@ -16,27 +16,101 @@ os.environ.setdefault('TRITON_CACHE_DIR', os.path.join(BASE_DIR, 'triton_cache')
 os.environ.setdefault('TORCHINDUCTOR_CACHE_DIR', os.path.join(BASE_DIR, 'inductor_cache'))
 if IS_MODELSCOPE:
     os.environ.setdefault('TORCH_USE_HIP_DSA', '1')
+    os.environ.setdefault('PYTORCH_HIP_ALLOC_CONF', 'expandable_segments:True')
 
-if IS_MODELSCOPE and 'HSA_OVERRIDE_GFX_VERSION' not in os.environ:
+_GFX_VERSION_MAP = {
+    'gfx900': '9.0.0',
+    'gfx906': '9.0.6',
+    'gfx908': '9.0.8',
+    'gfx90a': '9.0.10',
+    'gfx940': '9.4.0',
+    'gfx941': '9.4.1',
+    'gfx942': '9.4.2',
+    'gfx1030': '10.3.0',
+    'gfx1031': '10.3.0',
+    'gfx1032': '10.3.0',
+    'gfx1100': '11.0.0',
+    'gfx1101': '11.0.0',
+    'gfx1102': '11.0.0',
+    'gfx1103': '11.0.0',
+    'gfx1150': '11.5.0',
+    'gfx1151': '11.5.1',
+    'gfx1200': '12.0.0',
+    'gfx1201': '12.0.1',
+}
+
+_GPU_NAME_GFX_HINTS = {
+    'mi250': 'gfx90a', 'mi210': 'gfx90a',
+    'mi100': 'gfx908', 'mi50': 'gfx906',
+    'mi300x': 'gfx942', 'mi300a': 'gfx941', 'mi300': 'gfx940',
+    'rx 7900': 'gfx1100', 'rx 7800': 'gfx1101', 'rx 7700': 'gfx1101',
+    'rx 7600': 'gfx1102',
+    'rx 6900': 'gfx1030', 'rx 6800': 'gfx1030',
+    'rx 6700': 'gfx1031', 'rx 6600': 'gfx1032',
+}
+
+
+def _get_gfx_arch():
+    if not t.cuda.is_available():
+        return None
+    try:
+        props = t.cuda.get_device_properties(0)
+        gpu_name = getattr(props, 'name', '').lower()
+        for hint, arch in _GPU_NAME_GFX_HINTS.items():
+            if hint in gpu_name:
+                return arch
+        gcn_arch = getattr(props, 'gcnArchName', '').split(':')[0].strip()
+        if gcn_arch and gcn_arch in _GFX_VERSION_MAP:
+            return gcn_arch
+        arch_list = t.cuda.get_arch_list()
+        if arch_list and len(arch_list) == 1:
+            return arch_list[0]
+    except Exception:
+        pass
+    return None
+
+
+def _should_override_gfx(gfx_arch):
+    if gfx_arch is None:
+        return False
+    try:
+        supported = t.cuda.get_arch_list()
+        if supported and gfx_arch in supported:
+            return False
+    except Exception:
+        pass
+    return gfx_arch in _GFX_VERSION_MAP
+
+
+def _configure_hsa_override():
+    if 'HSA_OVERRIDE_GFX_VERSION' in os.environ:
+        return
+    if not IS_MODELSCOPE:
+        return
+    gfx_arch = _get_gfx_arch()
+    if gfx_arch is not None:
+        if not _should_override_gfx(gfx_arch):
+            print(f'[HSA] GPU arch {gfx_arch} is natively supported by PyTorch, '
+                  f'skipping HSA_OVERRIDE_GFX_VERSION')
+            return
+        version = _GFX_VERSION_MAP.get(gfx_arch)
+        if version:
+            os.environ['HSA_OVERRIDE_GFX_VERSION'] = version
+            print(f'[HSA] Set HSA_OVERRIDE_GFX_VERSION={version} for {gfx_arch}')
+            return
     try:
         if t.cuda.is_available():
             props = t.cuda.get_device_properties(0)
-            gpu_name = getattr(props, 'name', '').lower()
             vram = getattr(props, 'total_mem', getattr(props, 'total_memory', 0)) / (1024**3)
-            if 'mi250' in gpu_name or 'mi210' in gpu_name or 'gfx90a' in gpu_name:
-                os.environ['HSA_OVERRIDE_GFX_VERSION'] = '9.0.0'
-            elif 'mi100' in gpu_name or 'gfx908' in gpu_name:
-                os.environ['HSA_OVERRIDE_GFX_VERSION'] = '9.0.1'
-            elif 'mi50' in gpu_name or 'gfx906' in gpu_name:
-                os.environ['HSA_OVERRIDE_GFX_VERSION'] = '9.0.6'
-            elif vram > 100:
-                os.environ['HSA_OVERRIDE_GFX_VERSION'] = '9.0.0'
-            else:
-                os.environ['HSA_OVERRIDE_GFX_VERSION'] = '9.0.0'
+            if vram > 100:
+                os.environ['HSA_OVERRIDE_GFX_VERSION'] = '9.0.10'
+                print(f'[HSA] Large VRAM GPU ({vram:.0f}GB), '
+                      f'set HSA_OVERRIDE_GFX_VERSION=9.0.10 as fallback')
     except Exception:
-        os.environ.setdefault('HSA_OVERRIDE_GFX_VERSION', '9.0.0')
-else:
-    os.environ.setdefault('HSA_OVERRIDE_GFX_VERSION', '9.0.0')
+        pass
+
+
+_configure_hsa_override()
 
 
 def _is_triton_available():
@@ -96,6 +170,81 @@ def _get_total_vram_gb():
 GPU_PLATFORM = _detect_gpu_platform()
 TOTAL_VRAM_GB = _get_total_vram_gb()
 NUM_PHYSICAL_CORES = multiprocessing.cpu_count() or 2
+
+
+def _detect_rocm_version():
+    if not hasattr(t.version, 'hip') or t.version.hip is None:
+        return None
+    try:
+        parts = t.version.hip.split('.')
+        major, minor = int(parts[0]), int(parts[1])
+        return (major, minor)
+    except Exception:
+        return None
+
+
+ROCM_VERSION = _detect_rocm_version()
+
+
+def _check_rocm_compatibility():
+    if GPU_PLATFORM != 'amd_rocm':
+        return
+    if ROCM_VERSION is not None:
+        major, minor = ROCM_VERSION
+        if major == 6 and minor == 2:
+            print(f'[ROCM-WARN] ROCm 6.2.x detected: Conv2d with certain out_channels '
+                  f'may crash (HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION). '
+                  f'Consider upgrading to ROCm 6.3+.')
+        if major == 7 and minor == 0:
+            gfx = _get_gfx_arch()
+            if gfx and gfx.startswith('gfx12'):
+                print(f'[ROCM-WARN] ROCm 7.0 + RDNA4 ({gfx}) detected: random memory access '
+                      f'faults may occur due to expert scheduling mode. '
+                      f'Consider adding amdgpu.cwsr_enable=0 to kernel boot params.')
+    pytorch_ver = t.__version__
+    if pytorch_ver.startswith('2.8.0') and GPU_PLATFORM == 'amd_rocm':
+        try:
+            import rocblas
+        except ImportError:
+            pass
+        try:
+            test_a = t.randn(2, 2, device='cuda')
+            test_b = t.randn(2, 2, device='cuda')
+            _ = test_a @ test_b
+            t.cuda.synchronize()
+            del test_a, test_b
+        except Exception:
+            print(f'[ROCM-WARN] PyTorch 2.8.0+rocm: matmul segfault detected, '
+                  f'possible rocBLAS packaging bug. '
+                  f'Consider using nightly wheels: pip install --pre torch '
+                  f'--index-url https://download.pytorch.org/whl/nightly/rocm6.4')
+
+
+_check_rocm_compatibility()
+
+
+def _configure_rocm_blas_backend():
+    if GPU_PLATFORM != 'amd_rocm':
+        return
+    try:
+        pytorch_ver = t.__version__
+        ver_parts = pytorch_ver.split('.')[:2]
+        major_minor = tuple(int(x.split('+')[0]) for x in ver_parts)
+    except Exception:
+        return
+    if major_minor < (2, 7):
+        return
+    try:
+        if not hasattr(t.backends.cuda, 'preferred_blas_library'):
+            return
+        current = t.backends.cuda.preferred_blas_library()
+        if current == 'cublaslt':
+            t.backends.cuda.preferred_blas_library("cublas")
+            print(f'[BLAS] Switched BLAS backend from hipBLASLt to rocBLAS '
+                  f'(PyTorch {pytorch_ver}+ROCm: hipBLASLt lacks fp16_alt_impl '
+                  f'for backward pass, which can silently flush subnormal gradients to zero)')
+    except Exception as e:
+        print(f'[BLAS] Failed to configure BLAS backend: {e}')
 
 
 class GPUProfile:
@@ -303,6 +452,9 @@ def _detect_gpu_profile():
     if GPU_PLATFORM == 'amd_rocm' and profile.multiprocessing_context is not None:
         profile.multiprocessing_context = 'spawn'
 
+    if GPU_PLATFORM == 'amd_rocm':
+        _configure_rocm_blas_backend()
+
     if profile.use_torch_compile and not COMPILE_AVAILABLE:
         print(f'[COMPILE] torch.compile not available on this platform '
               f'(platform={sys.platform}, triton={TRITON_AVAILABLE}), disabling')
@@ -447,6 +599,22 @@ def print_env_info():
     print(f"GPU Platform: {GPU_PLATFORM.upper()}")
     print(f"Total VRAM: {TOTAL_VRAM_GB:.1f} GB")
     print(f"Physical CPU Cores: {NUM_PHYSICAL_CORES}")
+    if GPU_PLATFORM == 'amd_rocm':
+        rocm_str = f"{ROCM_VERSION[0]}.{ROCM_VERSION[1]}" if ROCM_VERSION else "unknown"
+        print(f"ROCm Version: {rocm_str}")
+        hip_ver = getattr(t.version, 'hip', None)
+        if hip_ver:
+            print(f"HIP Runtime: {hip_ver}")
+        try:
+            blas_backend = t.backends.cuda.preferred_blas_library()
+            print(f"BLAS Backend: {blas_backend}")
+        except Exception:
+            pass
+        gfx = _get_gfx_arch()
+        if gfx:
+            print(f"GPU Arch: {gfx}")
+        hsa_ver = os.environ.get('HSA_OVERRIDE_GFX_VERSION', 'not set')
+        print(f"HSA_OVERRIDE_GFX_VERSION: {hsa_ver}")
     print(f"Active Profile: {ACTIVE_PROFILE.__class__.__name__}")
     print(f"Data Loader Workers: {config.num_workers}")
     print(f"Train Batch Size: {config.batch_size}")

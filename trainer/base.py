@@ -207,32 +207,67 @@ class BaseTrainer:
             t.cuda.synchronize()
             del test
             t.cuda.empty_cache()
-            print('[GPU-CHECK] GPU sanity check passed')
         except RuntimeError as e:
             err_str = str(e).lower()
-            if 'hip' in err_str or 'illegal' in err_str or 'cuda' in err_str:
-                print(f'[GPU-CHECK] GPU sanity check FAILED: {e}')
-                print('[GPU-CHECK] Attempting CUDA context reset...')
-                try:
-                    t.cuda.empty_cache()
-                    t.cuda.synchronize()
-                except Exception:
-                    pass
-                try:
-                    test = t.randn(2, 3, 16, 16, device=self.device)
-                    _ = test + test
-                    t.cuda.synchronize()
-                    del test
-                    t.cuda.empty_cache()
-                    print('[GPU-CHECK] GPU recovered after reset')
-                except Exception as e2:
-                    print(f'[GPU-CHECK] GPU unrecoverable: {e2}')
-                    print('[GPU-CHECK] Falling back to CPU')
-                    self.device = t.device('cpu')
-                    self.use_amp = False
-                    config.use_torch_compile = False
+            if 'hip' in err_str or 'illegal' in err_str or 'cuda' in err_str or 'aperture' in err_str:
+                print(f'[GPU-CHECK] GPU sanity check FAILED (basic ops): {e}')
+                self._handle_gpu_check_failure(e)
+                return
             else:
                 raise
+        try:
+            conv_weight = t.randn(16, 3, 3, 3, device=self.device)
+            conv_input = t.randn(2, 3, 32, 32, device=self.device)
+            _ = t.nn.functional.conv2d(conv_input, conv_weight, padding=1)
+            t.cuda.synchronize()
+            del conv_weight, conv_input
+            t.cuda.empty_cache()
+        except RuntimeError as e:
+            err_str = str(e).lower()
+            if 'hip' in err_str or 'illegal' in err_str or 'cuda' in err_str or 'aperture' in err_str or 'miopen' in err_str:
+                print(f'[GPU-CHECK] GPU sanity check FAILED (conv2d): {e}')
+                self._handle_gpu_check_failure(e)
+                return
+            else:
+                raise
+        try:
+            mat_a = t.randn(64, 64, device=self.device)
+            mat_b = t.randn(64, 64, device=self.device)
+            _ = mat_a @ mat_b
+            t.cuda.synchronize()
+            del mat_a, mat_b
+            t.cuda.empty_cache()
+        except RuntimeError as e:
+            err_str = str(e).lower()
+            if 'hip' in err_str or 'illegal' in err_str or 'cuda' in err_str or 'aperture' in err_str:
+                print(f'[GPU-CHECK] GPU sanity check FAILED (matmul): {e}')
+                self._handle_gpu_check_failure(e)
+                return
+            else:
+                raise
+        print('[GPU-CHECK] GPU sanity check passed (add+conv2d+matmul)')
+
+    def _handle_gpu_check_failure(self, original_error):
+        print('[GPU-CHECK] Attempting CUDA context reset...')
+        try:
+            t.cuda.empty_cache()
+            t.cuda.synchronize()
+        except Exception:
+            pass
+        try:
+            test = t.randn(2, 3, 16, 16, device=self.device)
+            _ = test + test
+            t.cuda.synchronize()
+            del test
+            t.cuda.empty_cache()
+            print('[GPU-CHECK] GPU recovered after reset')
+        except Exception as e2:
+            print(f'[GPU-CHECK] GPU unrecoverable: {e2}')
+            print('[GPU-CHECK] Falling back to CPU')
+            self.device = t.device('cpu')
+            self.use_amp = False
+            config.use_torch_compile = False
+            config.multiprocessing_context = None
 
     def _setup_optimizer(self, backbone_params, other_params):
         return SGD([
