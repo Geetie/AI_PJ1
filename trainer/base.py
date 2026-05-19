@@ -271,12 +271,26 @@ class BaseTrainer:
             config.multiprocessing_context = None
 
     def _setup_optimizer(self, backbone_params, other_params):
+        if config.optimizer_type == 'adamw':
+            from torch.optim import AdamW
+            return AdamW([
+                {'params': backbone_params, 'lr': config.lr * config.backbone_lr_factor},
+                {'params': other_params, 'lr': config.lr},
+            ], weight_decay=config.weights_decay)
         return SGD([
             {'params': backbone_params, 'lr': config.lr * config.backbone_lr_factor},
             {'params': other_params, 'lr': config.lr},
         ], momentum=config.momentum, weight_decay=config.weights_decay, nesterov=True)
 
     def _setup_scheduler(self):
+        if config.scheduler_type == 'warm_restarts':
+            warmup_scheduler = LinearLR(self.optimizer, start_factor=0.01,
+                                        total_iters=config.warmup_epochs)
+            restart_scheduler = CosineAnnealingWarmRestarts(
+                self.optimizer, T_0=10, T_mult=2, eta_min=1e-6)
+            return SequentialLR(self.optimizer,
+                                schedulers=[warmup_scheduler, restart_scheduler],
+                                milestones=[config.warmup_epochs])
         warmup_scheduler = LinearLR(self.optimizer, start_factor=0.01,
                                     total_iters=config.warmup_epochs)
         cosine_scheduler = CosineAnnealingLR(self.optimizer, T_max=config.epoches - config.warmup_epochs,

@@ -214,6 +214,9 @@ class GPUProfile:
     aug_rotation_degrees = 10
     aug_blur_prob = 0.15
     roi_gt_prob = 0.8
+    cls_loss_weight = 1.5
+    optimizer_type = 'sgd'
+    scheduler_type = 'warmup_cosine'
 
 
 class CPUProfile(GPUProfile):
@@ -239,8 +242,8 @@ class CPUProfile(GPUProfile):
 
 class A100Profile(GPUProfile):
     platform = 'nvidia_cuda'
-    batch_size = 64
-    eval_batch_size = 96
+    batch_size = 96
+    eval_batch_size = 128
     num_workers = 6
     prefetch_factor = 2
     input_height = 384
@@ -255,17 +258,18 @@ class A100Profile(GPUProfile):
     oom_headroom_ratio = 0.15
     max_checkpoints = 3
     pin_memory = True
-    tta_sizes = [384, 416]
-    lr = 1e-3
+    tta_sizes = [288, 320, 352, 384, 416]
+    lr = 2e-4
     backbone_lr_factor = 0.1
-    warmup_epochs = 5
-    dropout = 0.3
+    warmup_epochs = 3
+    dropout = 0.2
     ema_decay = 0.999
     aux_loss_weight = 0.5
     bbox_loss_weight = 2.0
     attn_diversity_weight = 0.5
-    attn_supervision_weight = 1.5
-    ordering_loss_weight = 0.8
+    attn_supervision_weight = 0.5
+    ordering_loss_weight = 0.2
+    cls_loss_weight = 2.5
     multiscale_feat_dim = 512
     pos_embed_channels = 64
     feat_spatial_size = 40
@@ -275,12 +279,14 @@ class A100Profile(GPUProfile):
     head_interaction_layers = 2
     num_attn_channels = 8
     cutmix_alpha = 1.0
-    cutmix_prob = 0.6
-    erase_prob = 0.3
+    cutmix_prob = 0.4
+    erase_prob = 0.15
     smooth = 0.1
-    aug_rotation_degrees = 15
-    aug_blur_prob = 0.2
+    aug_rotation_degrees = 8
+    aug_blur_prob = 0.1
     roi_gt_prob = 0.8
+    optimizer_type = 'adamw'
+    scheduler_type = 'warm_restarts'
 
 
 class AMDMidProfile(GPUProfile):
@@ -534,6 +540,9 @@ class Config:
     aug_blur_prob = ACTIVE_PROFILE.aug_blur_prob
     roi_gt_prob = ACTIVE_PROFILE.roi_gt_prob
     num_attn_channels = ACTIVE_PROFILE.num_attn_channels
+    cls_loss_weight = ACTIVE_PROFILE.cls_loss_weight
+    optimizer_type = ACTIVE_PROFILE.optimizer_type
+    scheduler_type = ACTIVE_PROFILE.scheduler_type
     early_stopping_patience = 15
     aux_loss_weight = ACTIVE_PROFILE.aux_loss_weight
     grad_accum_steps = ACTIVE_PROFILE.grad_accum_steps
