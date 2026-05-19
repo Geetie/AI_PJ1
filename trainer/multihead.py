@@ -60,6 +60,26 @@ class MultiHeadTrainer(BaseTrainer):
             self.model.load_state_dict(ckpt['model'], strict=False)
             if 'model_type' in ckpt:
                 self._model_type = ckpt['model_type']
+            if 'optimizer_type' in ckpt:
+                ckpt_opt_type = ckpt['optimizer_type']
+                if ckpt_opt_type != config.optimizer_type:
+                    self.logger.logger.info(f'[CKPT] Checkpoint optimizer_type={ckpt_opt_type} '
+                                           f'overrides config optimizer_type={config.optimizer_type}')
+                    config.optimizer_type = ckpt_opt_type
+            elif 'opt' in ckpt:
+                opt_keys = set(ckpt['opt'].get('param_groups', [{}])[0].keys())
+                if 'amsgrad' in opt_keys or 'max_lr' in opt_keys:
+                    config.optimizer_type = 'adamw'
+                    self.logger.logger.info('[CKPT] Detected AdamW optimizer from checkpoint state_dict')
+                else:
+                    config.optimizer_type = 'sgd'
+                    self.logger.logger.info('[CKPT] Detected SGD optimizer from checkpoint state_dict')
+            if 'scheduler_type' in ckpt:
+                ckpt_sched_type = ckpt['scheduler_type']
+                if ckpt_sched_type != config.scheduler_type:
+                    self.logger.logger.info(f'[CKPT] Checkpoint scheduler_type={ckpt_sched_type} '
+                                           f'overrides config scheduler_type={config.scheduler_type}')
+                    config.scheduler_type = ckpt_sched_type
             self.logger.logger.info(f'Load model from {config.pretrained}')
 
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
@@ -128,20 +148,13 @@ class MultiHeadTrainer(BaseTrainer):
                     self.optimizer.load_state_dict(ckpt['opt'])
                     self.logger.logger.info('Restored optimizer state from checkpoint')
                 except Exception as e:
-                    ckpt_opt_type = type(ckpt['opt']).__name__ if hasattr(ckpt['opt'], '__class__') else 'unknown'
-                    self.logger.logger.warning(
-                        f'Optimizer state incompatible (checkpoint has {ckpt_opt_type}, '
-                        f'current is {type(self.optimizer).__name__}). '
-                        f'Model weights are preserved, optimizer will start fresh — '
-                        f'this is expected when switching optimizer types.')
+                    self.logger.logger.warning(f'Failed to restore optimizer: {e}. Using new optimizer.')
             if 'lr_scheduler' in ckpt:
                 try:
                     self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
                     self.logger.logger.info('Restored lr_scheduler state from checkpoint')
                 except Exception as e:
-                    self.logger.logger.warning(
-                        f'LR scheduler state incompatible (optimizer type changed). '
-                        f'Using new scheduler with warmup — this is expected.')
+                    self.logger.logger.warning(f'Failed to restore lr_scheduler: {e}. Using new scheduler.')
             if 'scaler' in ckpt:
                 try:
                     self.scaler.load_state_dict(ckpt['scaler'])
@@ -153,12 +166,6 @@ class MultiHeadTrainer(BaseTrainer):
             self.logger.logger.info(f'Restored best_acc: {self.best_acc * 100:.2f}%, '
                                    f'start_epoch: {config.start_epoch}, '
                                    f'patience: {self.patience_counter}/{config.early_stopping_patience}')
-            self.logger.logger.info(
-                f'[RESUME] Model weights from checkpoint preserved. '
-                f'Optimizer: {type(self.optimizer).__name__}, '
-                f'Scheduler: {config.scheduler_type}, '
-                f'Training will continue from epoch {config.start_epoch + 1} '
-                f'with best_acc={self.best_acc * 100:.2f}%')
 
         self._gpu_warmup()
 

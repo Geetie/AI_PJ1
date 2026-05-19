@@ -501,6 +501,8 @@ class BaseTrainer:
         dicts['best_acc'] = self.best_acc
         dicts['best_checkpoint_path'] = self.best_checkpoint_path
         dicts['patience_counter'] = self.patience_counter
+        dicts['optimizer_type'] = config.optimizer_type
+        dicts['scheduler_type'] = config.scheduler_type
         if save_opt:
             dicts['opt'] = self.optimizer.state_dict()
             dicts['lr_scheduler'] = self.lr_scheduler.state_dict()
