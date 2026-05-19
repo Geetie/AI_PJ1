@@ -53,8 +53,8 @@ def attention_diversity_loss(attn_maps):
     loss = t.tensor(0.0, device=attn_maps[0].device)
     for i in range(n):
         for j in range(i + 1, n):
-            ai = attn_maps[i].flatten(2)
-            aj = attn_maps[j].flatten(2)
+            ai = attn_maps[i].flatten(2).float()
+            aj = attn_maps[j].flatten(2).float()
             loss = loss + (ai * aj).sum(dim=2).mean()
     return loss / (n * (n - 1) / 2)
 
@@ -66,8 +66,8 @@ def spatial_ordering_loss(attn_maps, bbox_preds=None, bbox_mask=None):
     loss = t.tensor(0.0, device=attn_maps[0].device)
 
     for i in range(len(attn_maps) - 1):
-        ai = attn_maps[i].flatten(2)
-        aj = attn_maps[i + 1].flatten(2)
+        ai = attn_maps[i].flatten(2).float()
+        aj = attn_maps[i + 1].flatten(2).float()
         H, W = attn_maps[i].shape[2], attn_maps[i].shape[3]
         grid_x = t.arange(W, device=ai.device).float()
         grid_x = grid_x.unsqueeze(0).expand(H, W).reshape(1, 1, -1)

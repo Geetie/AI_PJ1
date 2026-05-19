@@ -498,11 +498,12 @@ class MultiHeadTrainer(BaseTrainer):
                 for h in range(config.num_heads):
                     valid_mask = (true_lengths > h).float()
                     empty_mask = 1.0 - valid_mask
-                    head_loss = self.head_criteria[h](pred[h], label[:, h])
                     if use_cutmix:
                         head_loss_a = self.head_criteria[h](pred[h], label_a[:, h])
                         head_loss_b = self.head_criteria[h](pred[h], label_b[:, h])
                         head_loss = lam * head_loss_a + (1 - lam) * head_loss_b
+                    else:
+                        head_loss = self.head_criteria[h](pred[h], label[:, h])
                     if valid_mask.sum() > 0:
                         cls_loss = cls_loss + (head_loss * valid_mask).sum() / valid_mask.sum()
                     if empty_mask.sum() > 0:

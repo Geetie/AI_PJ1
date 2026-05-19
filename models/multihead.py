@@ -239,13 +239,8 @@ class DigitsResnet101(nn.Module):
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         head_cls_outs, bbox_outs, attn_maps = [], [], []
         head_feats = []
-        use_ckpt = self.training and config.use_gradient_checkpoint and not config.use_torch_compile
         for head in self.heads:
-            if use_ckpt:
-                cls_out, bbox_out, hidden, attn = t.utils.checkpoint.checkpoint(
-                    head, feat, True, use_reentrant=False)
-            else:
-                cls_out, bbox_out, hidden, attn = head(feat, return_attn=True)
+            cls_out, bbox_out, hidden, attn = head(feat, return_attn=True)
             head_cls_outs.append(cls_out)
             bbox_outs.append(bbox_out)
             head_feats.append(hidden)
