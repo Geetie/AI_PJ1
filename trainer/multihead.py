@@ -61,9 +61,18 @@ class MultiHeadTrainer(BaseTrainer):
 
         self.model = create_model(self._model_type).to(self.device)
 
+        self._loaded_from_checkpoint = False
+
         if config.pretrained is not None:
             ckpt = t.load(config.pretrained, map_location=self.device, weights_only=False)
-            self.model.load_state_dict(ckpt['model'], strict=False)
+            self._loaded_from_checkpoint = True
+            if config.resume_weights_only:
+                self.model.load_state_dict(ckpt['model'], strict=False)
+            elif 'train_model' in ckpt:
+                self.model.load_state_dict(ckpt['train_model'], strict=False)
+                self.logger.logger.info('[CKPT] Loaded train_model weights (not EMA) for continued training')
+            else:
+                self.model.load_state_dict(ckpt['model'], strict=False)
             if 'model_type' in ckpt:
                 self._model_type = ckpt['model_type']
             if config.resume_weights_only:
@@ -399,7 +408,7 @@ class MultiHeadTrainer(BaseTrainer):
     def _pre_epoch_hook(self, epoch):
         raw_model = self._get_raw_model()
         if hasattr(raw_model, 'set_roi_gt_prob'):
-            if config.resume_weights_only and epoch < 1:
+            if self._loaded_from_checkpoint and config.resume_weights_only and epoch < 1:
                 raw_model.set_roi_gt_prob(0.5)
             elif epoch < config.warmup_epochs:
                 raw_model.set_roi_gt_prob(1.0)

@@ -33,6 +33,7 @@ if __name__ == '__main__':
     if latest_checkpoint:
         print(f'Found latest checkpoint: {latest_checkpoint}')
         config.pretrained = latest_checkpoint
+        config.resume_weights_only = True
     else:
         print('No checkpoint found, starting from scratch.')
 
