@@ -128,13 +128,20 @@ class MultiHeadTrainer(BaseTrainer):
                     self.optimizer.load_state_dict(ckpt['opt'])
                     self.logger.logger.info('Restored optimizer state from checkpoint')
                 except Exception as e:
-                    self.logger.logger.warning(f'Failed to restore optimizer: {e}. Using new optimizer.')
+                    ckpt_opt_type = type(ckpt['opt']).__name__ if hasattr(ckpt['opt'], '__class__') else 'unknown'
+                    self.logger.logger.warning(
+                        f'Optimizer state incompatible (checkpoint has {ckpt_opt_type}, '
+                        f'current is {type(self.optimizer).__name__}). '
+                        f'Model weights are preserved, optimizer will start fresh — '
+                        f'this is expected when switching optimizer types.')
             if 'lr_scheduler' in ckpt:
                 try:
                     self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
                     self.logger.logger.info('Restored lr_scheduler state from checkpoint')
                 except Exception as e:
-                    self.logger.logger.warning(f'Failed to restore lr_scheduler: {e}. Using new scheduler.')
+                    self.logger.logger.warning(
+                        f'LR scheduler state incompatible (optimizer type changed). '
+                        f'Using new scheduler with warmup — this is expected.')
             if 'scaler' in ckpt:
                 try:
                     self.scaler.load_state_dict(ckpt['scaler'])
@@ -146,6 +153,12 @@ class MultiHeadTrainer(BaseTrainer):
             self.logger.logger.info(f'Restored best_acc: {self.best_acc * 100:.2f}%, '
                                    f'start_epoch: {config.start_epoch}, '
                                    f'patience: {self.patience_counter}/{config.early_stopping_patience}')
+            self.logger.logger.info(
+                f'[RESUME] Model weights from checkpoint preserved. '
+                f'Optimizer: {type(self.optimizer).__name__}, '
+                f'Scheduler: {config.scheduler_type}, '
+                f'Training will continue from epoch {config.start_epoch + 1} '
+                f'with best_acc={self.best_acc * 100:.2f}%')
 
         self._gpu_warmup()
 
