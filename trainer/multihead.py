@@ -27,18 +27,24 @@ from utils.compile_utils import (
 def _compute_joint_acc(pred_heads, labels, true_lengths, num_heads):
     head_correct = [(pred_heads[h].argmax(1) == labels[:, h]) for h in range(num_heads)]
     temp = t.stack(head_correct, dim=1)
-    valid_head_mask = t.stack([(true_lengths > h).float() for h in range(num_heads)], dim=1)
-    correct_mask = (temp | (valid_head_mask == 0))
+    valid_head_mask = t.stack([(true_lengths > h) for h in range(num_heads)], dim=1)
+    empty_correct = (pred_heads[h].argmax(1) == 10 for h in range(num_heads))
+    empty_correct = t.stack(list(empty_correct), dim=1)
+    correct_mask = t.where(valid_head_mask, temp, empty_correct)
     return t.all(correct_mask, dim=1).sum().item()
 
 
 def _compute_char_acc(pred_heads, labels, true_lengths, num_heads):
     corrects = 0
-    total_chars = true_lengths.sum().item()
+    total_chars = 0
     for h in range(num_heads):
-        valid_mask = (true_lengths > h).float()
+        valid_mask = (true_lengths > h)
         if valid_mask.sum() > 0:
             corrects += ((pred_heads[h].argmax(1) == labels[:, h]) * valid_mask).sum().item()
+        empty_mask = ~valid_mask
+        if empty_mask.sum() > 0:
+            corrects += ((pred_heads[h].argmax(1) == 10) * empty_mask).sum().item()
+        total_chars += len(labels)
     return corrects, total_chars
 
 
@@ -393,7 +399,9 @@ class MultiHeadTrainer(BaseTrainer):
     def _pre_epoch_hook(self, epoch):
         raw_model = self._get_raw_model()
         if hasattr(raw_model, 'set_roi_gt_prob'):
-            if epoch < config.warmup_epochs:
+            if config.resume_weights_only and epoch < 1:
+                raw_model.set_roi_gt_prob(0.5)
+            elif epoch < config.warmup_epochs:
                 raw_model.set_roi_gt_prob(1.0)
             else:
                 decay_end = int(config.epoches * 0.6)
@@ -480,14 +488,17 @@ class MultiHeadTrainer(BaseTrainer):
                 cls_loss = t.tensor(0.0, device=self.device)
                 for h in range(config.num_heads):
                     valid_mask = (true_lengths > h).float()
+                    empty_mask = 1.0 - valid_mask
+                    head_loss = self.head_criteria[h](pred[h], label[:, h])
+                    if use_cutmix:
+                        head_loss_a = self.head_criteria[h](pred[h], label_a[:, h])
+                        head_loss_b = self.head_criteria[h](pred[h], label_b[:, h])
+                        head_loss = lam * head_loss_a + (1 - lam) * head_loss_b
                     if valid_mask.sum() > 0:
-                        if use_cutmix:
-                            head_loss_a = self.head_criteria[h](pred[h], label_a[:, h])
-                            head_loss_b = self.head_criteria[h](pred[h], label_b[:, h])
-                            head_loss = lam * head_loss_a + (1 - lam) * head_loss_b
-                        else:
-                            head_loss = self.head_criteria[h](pred[h], label[:, h])
                         cls_loss = cls_loss + (head_loss * valid_mask).sum() / valid_mask.sum()
+                    if empty_mask.sum() > 0:
+                        empty_loss = F.cross_entropy(pred[h], t.full((pred[h].size(0),), 10, device=self.device, dtype=t.long), reduction='none')
+                        cls_loss = cls_loss + (empty_loss * empty_mask).sum() / empty_mask.sum() * 0.5
 
                 div_loss = attention_diversity_loss(attn_maps)
                 ord_loss = spatial_ordering_loss(attn_maps, bbox_preds=pred_bboxes, bbox_mask=bbox_mask)

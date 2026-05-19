@@ -249,7 +249,7 @@ class DigitsResnet101(nn.Module):
             head_cls_outs.append(cls_out)
             bbox_outs.append(bbox_out)
             head_feats.append(hidden)
-            attn_maps.append(attn.detach() if self.training else attn)
+            attn_maps.append(attn)
         bbox_tuple = tuple(bbox_outs)
         interacted = self.head_interaction(head_feats)
         cls_list = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
