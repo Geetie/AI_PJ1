@@ -60,29 +60,34 @@ class MultiHeadTrainer(BaseTrainer):
             self.model.load_state_dict(ckpt['model'], strict=False)
             if 'model_type' in ckpt:
                 self._model_type = ckpt['model_type']
-            if 'optimizer_type' in ckpt:
-                ckpt_opt_type = ckpt['optimizer_type']
-                if ckpt_opt_type != config.optimizer_type:
-                    self.logger.logger.info(f'[CKPT] Checkpoint optimizer_type={ckpt_opt_type} '
-                                           f'overrides config optimizer_type={config.optimizer_type}')
-                    config.optimizer_type = ckpt_opt_type
-            elif 'opt' in ckpt:
-                opt_keys = set(ckpt['opt'].get('param_groups', [{}])[0].keys())
-                if 'amsgrad' in opt_keys or 'max_lr' in opt_keys:
-                    config.optimizer_type = 'adamw'
-                    self.logger.logger.info('[CKPT] Detected AdamW optimizer from checkpoint state_dict')
-                else:
-                    config.optimizer_type = 'sgd'
-                    self.logger.logger.info('[CKPT] Detected SGD optimizer from checkpoint state_dict')
-            if 'scheduler_type' in ckpt:
-                ckpt_sched_type = ckpt['scheduler_type']
-                if ckpt_sched_type != config.scheduler_type:
-                    self.logger.logger.info(f'[CKPT] Checkpoint scheduler_type={ckpt_sched_type} '
-                                           f'overrides config scheduler_type={config.scheduler_type}')
-                    config.scheduler_type = ckpt_sched_type
-            elif config.optimizer_type == 'sgd' and config.scheduler_type != 'warmup_cosine':
-                config.scheduler_type = 'warmup_cosine'
-                self.logger.logger.info('[CKPT] SGD checkpoint detected, forcing scheduler_type=warmup_cosine')
+            if config.resume_weights_only:
+                self.logger.logger.info(f'[CKPT] resume_weights_only=True: loading model weights only, '
+                                       f'using config optimizer_type={config.optimizer_type} '
+                                       f'scheduler_type={config.scheduler_type}')
+            else:
+                if 'optimizer_type' in ckpt:
+                    ckpt_opt_type = ckpt['optimizer_type']
+                    if ckpt_opt_type != config.optimizer_type:
+                        self.logger.logger.info(f'[CKPT] Checkpoint optimizer_type={ckpt_opt_type} '
+                                               f'overrides config optimizer_type={config.optimizer_type}')
+                        config.optimizer_type = ckpt_opt_type
+                elif 'opt' in ckpt:
+                    opt_keys = set(ckpt['opt'].get('param_groups', [{}])[0].keys())
+                    if 'amsgrad' in opt_keys or 'max_lr' in opt_keys:
+                        config.optimizer_type = 'adamw'
+                        self.logger.logger.info('[CKPT] Detected AdamW optimizer from checkpoint state_dict')
+                    else:
+                        config.optimizer_type = 'sgd'
+                        self.logger.logger.info('[CKPT] Detected SGD optimizer from checkpoint state_dict')
+                if 'scheduler_type' in ckpt:
+                    ckpt_sched_type = ckpt['scheduler_type']
+                    if ckpt_sched_type != config.scheduler_type:
+                        self.logger.logger.info(f'[CKPT] Checkpoint scheduler_type={ckpt_sched_type} '
+                                               f'overrides config scheduler_type={config.scheduler_type}')
+                        config.scheduler_type = ckpt_sched_type
+                elif config.optimizer_type == 'sgd' and config.scheduler_type != 'warmup_cosine':
+                    config.scheduler_type = 'warmup_cosine'
+                    self.logger.logger.info('[CKPT] SGD checkpoint detected, forcing scheduler_type=warmup_cosine')
             self.logger.logger.info(f'Load model from {config.pretrained}')
 
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
@@ -141,34 +146,42 @@ class MultiHeadTrainer(BaseTrainer):
                                               f'stored best_acc={self.best_acc*100:.2f}%. '
                                               f'Correcting to filename value.')
                     self.best_acc = fname_acc_val
-            if 'epoch' in ckpt:
-                config.start_epoch = ckpt['epoch']
-                self._current_epoch = ckpt['epoch']
             if 'train_log' in ckpt:
                 self.train_log = ckpt['train_log']
-            if 'opt' in ckpt:
-                try:
-                    self.optimizer.load_state_dict(ckpt['opt'])
-                    self.logger.logger.info('Restored optimizer state from checkpoint')
-                except Exception as e:
-                    self.logger.logger.warning(f'Failed to restore optimizer: {e}. Using new optimizer.')
-            if 'lr_scheduler' in ckpt:
-                try:
-                    self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
-                    self.logger.logger.info('Restored lr_scheduler state from checkpoint')
-                except Exception as e:
-                    self.logger.logger.warning(f'Failed to restore lr_scheduler: {e}. Using new scheduler.')
-            if 'scaler' in ckpt:
-                try:
-                    self.scaler.load_state_dict(ckpt['scaler'])
-                    self.logger.logger.info('Restored scaler state from checkpoint')
-                except Exception as e:
-                    self.logger.logger.warning(f'Failed to restore scaler: {e}. Using new scaler.')
-            if 'patience_counter' in ckpt:
-                self.patience_counter = ckpt['patience_counter']
-            self.logger.logger.info(f'Restored best_acc: {self.best_acc * 100:.2f}%, '
-                                   f'start_epoch: {config.start_epoch}, '
-                                   f'patience: {self.patience_counter}/{config.early_stopping_patience}')
+            if config.resume_weights_only:
+                config.start_epoch = 0
+                self._current_epoch = 0
+                self.patience_counter = 0
+                self.logger.logger.info(f'[CKPT] resume_weights_only: best_acc={self.best_acc * 100:.2f}%, '
+                                       f'starting from epoch 1 with fresh '
+                                       f'{config.optimizer_type} optimizer and {config.scheduler_type} scheduler')
+            else:
+                if 'epoch' in ckpt:
+                    config.start_epoch = ckpt['epoch']
+                    self._current_epoch = ckpt['epoch']
+                if 'opt' in ckpt:
+                    try:
+                        self.optimizer.load_state_dict(ckpt['opt'])
+                        self.logger.logger.info('Restored optimizer state from checkpoint')
+                    except Exception as e:
+                        self.logger.logger.warning(f'Failed to restore optimizer: {e}. Using new optimizer.')
+                if 'lr_scheduler' in ckpt:
+                    try:
+                        self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
+                        self.logger.logger.info('Restored lr_scheduler state from checkpoint')
+                    except Exception as e:
+                        self.logger.logger.warning(f'Failed to restore lr_scheduler: {e}. Using new scheduler.')
+                if 'scaler' in ckpt:
+                    try:
+                        self.scaler.load_state_dict(ckpt['scaler'])
+                        self.logger.logger.info('Restored scaler state from checkpoint')
+                    except Exception as e:
+                        self.logger.logger.warning(f'Failed to restore scaler: {e}. Using new scaler.')
+                if 'patience_counter' in ckpt:
+                    self.patience_counter = ckpt['patience_counter']
+                self.logger.logger.info(f'Restored best_acc: {self.best_acc * 100:.2f}%, '
+                                       f'start_epoch: {config.start_epoch}, '
+                                       f'patience: {self.patience_counter}/{config.early_stopping_patience}')
 
         self._gpu_warmup()
 

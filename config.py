@@ -543,6 +543,7 @@ class Config:
     cls_loss_weight = ACTIVE_PROFILE.cls_loss_weight
     optimizer_type = ACTIVE_PROFILE.optimizer_type
     scheduler_type = ACTIVE_PROFILE.scheduler_type
+    resume_weights_only = True
     early_stopping_patience = 15
     aux_loss_weight = ACTIVE_PROFILE.aux_loss_weight
     grad_accum_steps = ACTIVE_PROFILE.grad_accum_steps
