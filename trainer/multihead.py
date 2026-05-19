@@ -80,6 +80,9 @@ class MultiHeadTrainer(BaseTrainer):
                     self.logger.logger.info(f'[CKPT] Checkpoint scheduler_type={ckpt_sched_type} '
                                            f'overrides config scheduler_type={config.scheduler_type}')
                     config.scheduler_type = ckpt_sched_type
+            elif config.optimizer_type == 'sgd' and config.scheduler_type != 'warmup_cosine':
+                config.scheduler_type = 'warmup_cosine'
+                self.logger.logger.info('[CKPT] SGD checkpoint detected, forcing scheduler_type=warmup_cosine')
             self.logger.logger.info(f'Load model from {config.pretrained}')
 
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
