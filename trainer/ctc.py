@@ -80,6 +80,29 @@ class CTCTrainer(BaseTrainer):
                 self._current_epoch = ckpt['epoch']
             if 'train_log' in ckpt:
                 self.train_log = ckpt['train_log']
+            if 'opt' in ckpt:
+                try:
+                    self.optimizer.load_state_dict(ckpt['opt'])
+                    self.logger.logger.info('Restored optimizer state from checkpoint')
+                except Exception as e:
+                    self.logger.logger.warning(f'Failed to restore optimizer: {e}. Using new optimizer.')
+            if 'lr_scheduler' in ckpt:
+                try:
+                    self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
+                    self.logger.logger.info('Restored lr_scheduler state from checkpoint')
+                except Exception as e:
+                    self.logger.logger.warning(f'Failed to restore lr_scheduler: {e}. Using new scheduler.')
+            if 'scaler' in ckpt:
+                try:
+                    self.scaler.load_state_dict(ckpt['scaler'])
+                    self.logger.logger.info('Restored scaler state from checkpoint')
+                except Exception as e:
+                    self.logger.logger.warning(f'Failed to restore scaler: {e}. Using new scaler.')
+            if 'patience_counter' in ckpt:
+                self.patience_counter = ckpt['patience_counter']
+            self.logger.logger.info(f'Restored best_acc: {self.best_acc * 100:.2f}%, '
+                                   f'start_epoch: {config.start_epoch}, '
+                                   f'patience: {self.patience_counter}/{config.early_stopping_patience}')
 
         self._gpu_warmup()
 

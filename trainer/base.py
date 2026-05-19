@@ -9,7 +9,7 @@ import glob as glob_mod
 import torch as t
 from tqdm.auto import tqdm
 from torch.optim import SGD
-from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR, CosineAnnealingWarmRestarts
 from torch.amp import GradScaler
 from datetime import datetime
 from config import config, SCRIPT_DIR, GPU_PLATFORM, TOTAL_VRAM_GB, NUM_PHYSICAL_CORES
@@ -284,6 +284,14 @@ class BaseTrainer:
         return SequentialLR(self.optimizer,
                             schedulers=[warmup_scheduler, cosine_scheduler],
                             milestones=[config.warmup_epochs])
+
+    def _setup_scheduler_with_restarts(self):
+        return CosineAnnealingWarmRestarts(
+            self.optimizer,
+            T_0=10,
+            T_mult=2,
+            eta_min=1e-6
+        )
 
     def _setup_scaler(self):
         return GradScaler(self.device.type, enabled=self.use_amp)

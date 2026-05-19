@@ -218,10 +218,10 @@ class GPUProfile:
 
 class CPUProfile(GPUProfile):
     platform = 'cpu'
-    batch_size = 32
-    eval_batch_size = 32
+    batch_size = 8
+    eval_batch_size = 16
     num_workers = 0
-    prefetch_factor = 2
+    prefetch_factor = 1
     input_height = 224
     input_width = 224
     resize_size = 256
@@ -230,6 +230,11 @@ class CPUProfile(GPUProfile):
     use_torch_compile = False
     pin_memory = False
     tta_sizes = [224, 256]
+    lr = 5e-4
+    dropout = 0.2
+    transformer_heads = 2
+    transformer_layers = 2
+    use_gradient_checkpoint = False
 
 
 class A100Profile(GPUProfile):
@@ -251,16 +256,16 @@ class A100Profile(GPUProfile):
     max_checkpoints = 3
     pin_memory = True
     tta_sizes = [384, 416]
-    lr = 4e-4
+    lr = 1e-3
     backbone_lr_factor = 0.1
     warmup_epochs = 5
-    dropout = 0.2
+    dropout = 0.3
     ema_decay = 0.999
-    aux_loss_weight = 0.3
-    bbox_loss_weight = 1.0
+    aux_loss_weight = 0.5
+    bbox_loss_weight = 2.0
     attn_diversity_weight = 0.5
-    attn_supervision_weight = 0.6
-    ordering_loss_weight = 1.2
+    attn_supervision_weight = 1.5
+    ordering_loss_weight = 0.8
     multiscale_feat_dim = 512
     pos_embed_channels = 64
     feat_spatial_size = 40
@@ -270,11 +275,11 @@ class A100Profile(GPUProfile):
     head_interaction_layers = 2
     num_attn_channels = 8
     cutmix_alpha = 1.0
-    cutmix_prob = 0.5
-    erase_prob = 0.2
+    cutmix_prob = 0.6
+    erase_prob = 0.3
     smooth = 0.1
-    aug_rotation_degrees = 3
-    aug_blur_prob = 0.15
+    aug_rotation_degrees = 15
+    aug_blur_prob = 0.2
     roi_gt_prob = 0.8
 
 
@@ -529,7 +534,7 @@ class Config:
     aug_blur_prob = ACTIVE_PROFILE.aug_blur_prob
     roi_gt_prob = ACTIVE_PROFILE.roi_gt_prob
     num_attn_channels = ACTIVE_PROFILE.num_attn_channels
-    early_stopping_patience = 20
+    early_stopping_patience = 15
     aux_loss_weight = ACTIVE_PROFILE.aux_loss_weight
     grad_accum_steps = ACTIVE_PROFILE.grad_accum_steps
     eval_batch_size = ACTIVE_PROFILE.eval_batch_size
