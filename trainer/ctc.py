@@ -1,6 +1,8 @@
 import gc
+import random
 import time
 import threading
+import numpy as np
 import torch as t
 import torch.nn as nn
 from torch.amp import autocast
@@ -15,6 +17,7 @@ from inference.decode import ctc_greedy_decode, ctc_beam_decode
 from utils.compile_utils import (
     try_compile_model, warmup_model, get_raw_model, CompileLogger, configure_compile_cache
 )
+from utils.seed import make_epoch_generator
 
 
 class CTCTrainer(BaseTrainer):
@@ -32,10 +35,23 @@ class CTCTrainer(BaseTrainer):
 
         if config.pretrained is not None:
             ckpt = t.load(config.pretrained, map_location=self.device, weights_only=False)
-            self.model.load_state_dict(ckpt['model'], strict=False)
+            if config.resume_weights_only:
+                self.model.load_state_dict(ckpt['model'], strict=False)
+            elif 'train_model' in ckpt:
+                self.model.load_state_dict(ckpt['train_model'], strict=False)
+                print(f'[CKPT] Loaded train_model weights (not EMA) for continued training')
+            else:
+                self.model.load_state_dict(ckpt['model'], strict=False)
             print(f'Load model from {config.pretrained}')
 
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
+        if config.pretrained is not None and not config.resume_weights_only:
+            if 'model' in ckpt:
+                try:
+                    self.ema.ema.load_state_dict(ckpt['model'], strict=False)
+                    self.logger.logger.info('[CKPT] Restored EMA shadow model from checkpoint')
+                except Exception as e:
+                    self.logger.logger.warning(f'[CKPT] Failed to restore EMA shadow model: {e}')
         self.criterion = nn.CTCLoss(blank=10, zero_infinity=True)
 
         self._compile_logger = CompileLogger.get_instance()
@@ -75,42 +91,55 @@ class CTCTrainer(BaseTrainer):
         if config.pretrained is not None:
             if 'best_acc' in ckpt:
                 self.best_acc = ckpt['best_acc']
-            if 'epoch' in ckpt:
-                config.start_epoch = ckpt['epoch']
-                self._current_epoch = ckpt['epoch']
-            if 'train_log' in ckpt:
-                self.train_log = ckpt['train_log']
-            if 'opt' in ckpt:
+            if 'best_checkpoint_path' in ckpt:
+                self.best_checkpoint_path = ckpt['best_checkpoint_path']
+            if config.resume_weights_only:
+                config.start_epoch = 0
+                self._current_epoch = 0
+                self.patience_counter = 0
+                print(f'[CKPT] resume_weights_only: best_acc={self.best_acc * 100:.2f}%, '
+                      f'starting from epoch 1 with fresh optimizer')
+            else:
+                if 'epoch' in ckpt:
+                    config.start_epoch = ckpt['epoch']
+                    self._current_epoch = ckpt['epoch']
+                if 'train_log' in ckpt:
+                    self.train_log = ckpt['train_log']
+                if 'patience_counter' in ckpt:
+                    self.patience_counter = ckpt['patience_counter']
+            if not config.resume_weights_only and 'opt' in ckpt:
                 try:
                     self.optimizer.load_state_dict(ckpt['opt'])
                     self.logger.logger.info('Restored optimizer state from checkpoint')
                 except Exception as e:
                     self.logger.logger.warning(f'Failed to restore optimizer: {e}. Using new optimizer.')
-            if 'lr_scheduler' in ckpt:
+            if not config.resume_weights_only and 'lr_scheduler' in ckpt:
                 try:
                     self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
                     self.logger.logger.info('Restored lr_scheduler state from checkpoint')
                 except Exception as e:
                     self.logger.logger.warning(f'Failed to restore lr_scheduler: {e}. Using new scheduler.')
-            if 'scaler' in ckpt:
+            if not config.resume_weights_only and 'scaler' in ckpt:
                 try:
                     self.scaler.load_state_dict(ckpt['scaler'])
                     self.logger.logger.info('Restored scaler state from checkpoint')
                 except Exception as e:
                     self.logger.logger.warning(f'Failed to restore scaler: {e}. Using new scaler.')
-            if 'patience_counter' in ckpt:
-                self.patience_counter = ckpt['patience_counter']
             self.logger.logger.info(f'Restored best_acc: {self.best_acc * 100:.2f}%, '
                                    f'start_epoch: {config.start_epoch}, '
                                    f'patience: {self.patience_counter}/{config.early_stopping_patience}')
 
         self._gpu_warmup()
 
+        self._base_seed = 42
+        self._train_generator = make_epoch_generator(self._base_seed, epoch=0)
+
         self.train_set = CTCDataset(mode='train', aug=True,
                                     input_size=(config.input_height, config.input_width))
         self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
                                               shuffle=True, drop_last=True,
-                                              collate_fn=ctc_collate_fn)
+                                              collate_fn=ctc_collate_fn,
+                                              generator=self._train_generator)
         if val:
             self.val_set = CTCDataset(mode='val', aug=False,
                                       input_size=(config.input_height, config.input_width))
@@ -120,23 +149,53 @@ class CTCTrainer(BaseTrainer):
         else:
             self.val_loader = None
 
-    def _make_loader(self, dataset, batch_size, shuffle=False, drop_last=False, collate_fn=None):
+    @staticmethod
+    def _worker_init_fn(worker_id):
+        worker_seed = t.initial_seed() % (2**32)
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
+    def _make_loader(self, dataset, batch_size, shuffle=False, drop_last=False, collate_fn=None, generator=None, persistent_override=None):
         kwargs = dict(
             batch_size=batch_size, shuffle=shuffle,
             num_workers=config.num_workers, pin_memory=config.pin_memory,
             drop_last=drop_last,
         )
+        if shuffle and generator is not None:
+            kwargs['generator'] = generator
+        pw = persistent_override if persistent_override is not None else config.persistent_workers
         if config.num_workers > 0:
             kwargs['prefetch_factor'] = config.prefetch_factor
-            kwargs['persistent_workers'] = config.persistent_workers
+            kwargs['persistent_workers'] = pw
+            kwargs['worker_init_fn'] = self._worker_init_fn
         if config.multiprocessing_context is not None and config.num_workers > 0:
             kwargs['multiprocessing_context'] = config.multiprocessing_context
         if collate_fn is not None:
             kwargs['collate_fn'] = collate_fn
-        print(f'[DataLoader] batch={batch_size}, workers={config.num_workers}, '
+        self.logger.logger.info(f'[DataLoader] batch={batch_size}, workers={config.num_workers}, '
               f'pin_mem={config.pin_memory}, ctx={config.multiprocessing_context}, '
-              f'persistent={config.persistent_workers}, dataset={len(dataset)}')
+              f'persistent={pw}, dataset={len(dataset)}, '
+              f'generator={"epoch_seeded" if generator is not None else "global_rng"}')
         return DataLoader(dataset, **kwargs)
+
+    def _pre_epoch_hook(self, epoch):
+        epoch_seed = self._base_seed + epoch * 1000
+        random.seed(epoch_seed)
+        np.random.seed(epoch_seed)
+        t.manual_seed(epoch_seed)
+        if t.cuda.is_available():
+            t.cuda.manual_seed_all(epoch_seed)
+
+        self._cleanup_dataloader(self.train_loader)
+        self._train_generator = make_epoch_generator(self._base_seed, epoch=epoch)
+        self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
+                                              shuffle=True, drop_last=True,
+                                              collate_fn=ctc_collate_fn,
+                                              generator=self._train_generator,
+                                              persistent_override=False)
+        self.logger.logger.info(
+            f'[EPOCH-PRE] epoch={epoch+1} lr={self.optimizer.param_groups[0]["lr"]:.8f} '
+            f'generator_seed={self._base_seed + epoch}')
 
     def _cleanup_dataloader(self, loader):
         if loader is not None:
@@ -152,7 +211,8 @@ class CTCTrainer(BaseTrainer):
         self._cleanup_dataloader(self.val_loader)
         self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
                                               shuffle=True, drop_last=True,
-                                              collate_fn=ctc_collate_fn)
+                                              collate_fn=ctc_collate_fn,
+                                              generator=self._train_generator)
         if self.val_loader is not None:
             self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
                                                 shuffle=False, drop_last=False,
@@ -224,7 +284,7 @@ class CTCTrainer(BaseTrainer):
             img = img.to(self.device)
             label_concat = label_concat.to(self.device)
 
-            if (i + 1) % config.grad_accum_steps == 1:
+            if i % config.grad_accum_steps == 0:
                 self.optimizer.zero_grad()
 
             with autocast(self.device.type, enabled=self.use_amp):

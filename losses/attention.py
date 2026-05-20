@@ -48,9 +48,10 @@ class AttentionSupervisionLoss(nn.Module):
 
 def attention_diversity_loss(attn_maps):
     if attn_maps is None or len(attn_maps) < 2:
-        return t.tensor(0.0, requires_grad=True)
+        dev = attn_maps[0].device if attn_maps is not None and len(attn_maps) > 0 else t.device('cpu')
+        return t.tensor(0.0, device=dev, requires_grad=True)
     n = len(attn_maps)
-    loss = t.tensor(0.0, device=attn_maps[0].device)
+    loss = t.tensor(0.0, device=attn_maps[0].device, requires_grad=True)
     for i in range(n):
         for j in range(i + 1, n):
             ai = attn_maps[i].flatten(2).float()
@@ -63,17 +64,23 @@ def spatial_ordering_loss(attn_maps, bbox_preds=None, bbox_mask=None):
     if attn_maps is None or len(attn_maps) < 2:
         return t.tensor(0.0, device=attn_maps[0].device if attn_maps is not None and len(attn_maps) > 0 else t.device('cpu'), requires_grad=True)
 
-    loss = t.tensor(0.0, device=attn_maps[0].device)
+    loss = t.tensor(0.0, device=attn_maps[0].device, requires_grad=True)
 
     for i in range(len(attn_maps) - 1):
+        if bbox_mask is not None:
+            mask_both = (bbox_mask[:, i] > 0) & (bbox_mask[:, i + 1] > 0)
+            if mask_both.sum() == 0:
+                continue
         ai = attn_maps[i].flatten(2).float()
         aj = attn_maps[i + 1].flatten(2).float()
         H, W = attn_maps[i].shape[2], attn_maps[i].shape[3]
-        grid_x = t.arange(W, device=ai.device).float()
+        grid_x = t.arange(W, device=ai.device).float() / max(W - 1, 1)
         grid_x = grid_x.unsqueeze(0).expand(H, W).reshape(1, 1, -1)
         ci = (ai * grid_x).sum(dim=2) / (ai.sum(dim=2) + 1e-8)
         cj = (aj * grid_x).sum(dim=2) / (aj.sum(dim=2) + 1e-8)
         violation = F.relu(ci - cj)
+        if bbox_mask is not None:
+            violation = violation[mask_both]
         loss = loss + violation.mean()
 
     if bbox_preds is not None and bbox_mask is not None:

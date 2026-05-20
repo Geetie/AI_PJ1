@@ -12,3 +12,9 @@ def set_seed(seed=42, deterministic=False):
     if hasattr(t.backends, 'cudnn'):
         t.backends.cudnn.benchmark = not deterministic
         t.backends.cudnn.deterministic = deterministic
+
+
+def make_epoch_generator(base_seed=42, epoch=0):
+    generator = t.Generator()
+    generator.manual_seed(base_seed + epoch)
+    return generator

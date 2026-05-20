@@ -284,14 +284,14 @@ class BaseTrainer:
 
     def _setup_scheduler(self):
         if config.scheduler_type == 'warm_restarts':
-            warmup_scheduler = LinearLR(self.optimizer, start_factor=0.01,
+            warmup_scheduler = LinearLR(self.optimizer, start_factor=0.1,
                                         total_iters=config.warmup_epochs)
             restart_scheduler = CosineAnnealingWarmRestarts(
-                self.optimizer, T_0=10, T_mult=2, eta_min=1e-6)
+                self.optimizer, T_0=5, T_mult=2, eta_min=1e-6)
             return SequentialLR(self.optimizer,
                                 schedulers=[warmup_scheduler, restart_scheduler],
                                 milestones=[config.warmup_epochs])
-        warmup_scheduler = LinearLR(self.optimizer, start_factor=0.01,
+        warmup_scheduler = LinearLR(self.optimizer, start_factor=0.1,
                                     total_iters=config.warmup_epochs)
         cosine_scheduler = CosineAnnealingLR(self.optimizer, T_max=config.epoches - config.warmup_epochs,
                                              eta_min=1e-6)
@@ -302,7 +302,7 @@ class BaseTrainer:
     def _setup_scheduler_with_restarts(self):
         return CosineAnnealingWarmRestarts(
             self.optimizer,
-            T_0=10,
+            T_0=5,
             T_mult=2,
             eta_min=1e-6
         )
@@ -356,7 +356,23 @@ class BaseTrainer:
 
             self._current_epoch = epoch
 
+            if epoch > 0:
+                self.lr_scheduler.step()
+
             self._pre_epoch_hook(epoch)
+
+            current_lr = self.optimizer.param_groups[0]['lr']
+
+            if epoch == config.start_epoch or epoch % 10 == 0:
+                raw = self._get_raw_model()
+                param_norm = sum(p.data.norm().item() ** 2 for p in raw.parameters()) ** 0.5
+                grad_norm = sum(p.grad.norm().item() ** 2 for p in raw.parameters() if p.grad is not None) ** 0.5 if epoch > config.start_epoch else 0.0
+                self.logger.logger.info(
+                    f'[DIAG] Epoch {epoch+1}: param_norm={param_norm:.2f}, '
+                    f'grad_norm={grad_norm:.4f}, '
+                    f'lr={self.optimizer.param_groups[0]["lr"]:.6f}, '
+                    f'scaler_scale={self.scaler.get_scale():.1f}')
+
             self.logger.log_epoch_start(epoch)
             try:
                 train_acc = self._train_epoch(epoch)
@@ -385,7 +401,6 @@ class BaseTrainer:
                     t.cuda.reset_peak_memory_stats()
                     self._cleanup_dataloader(self.train_loader)
                     self._rebuild_dataloaders()
-                    self.lr_scheduler.step()
                     continue
                 elif 'shared memory' in err_msg and config.num_workers > 0:
                     config.num_workers = max(config.num_workers // 2, 0)
@@ -395,7 +410,6 @@ class BaseTrainer:
                         f'prefetch_factor to {config.prefetch_factor}')
                     self._cleanup_dataloader(self.train_loader)
                     self._rebuild_dataloaders()
-                    self.lr_scheduler.step()
                     continue
                 else:
                     raise
@@ -434,9 +448,6 @@ class BaseTrainer:
                     self.logger.logger.info(
                         f'[WAIT] Waiting {self._min_stable_epochs_for_recovery - self._stable_epoch_count} more stable epochs before batch_size recovery')
 
-            self.lr_scheduler.step()
-            current_lr = self.optimizer.param_groups[0]['lr']
-
             if (epoch + 1) % config.eval_interval == 0 or self._pending_save:
                 acc = 0.0
                 char_acc_val = None
@@ -463,15 +474,13 @@ class BaseTrainer:
                 if is_best:
                     best_path = os.path.join(config.checkpoints,
                                              'best-%s-acc-%.2f.pth' % (self._checkpoint_prefix, acc * 100))
+                    old_best = self.best_checkpoint_path
                     self.best_acc = acc
                     self.best_checkpoint_path = best_path
                     self.save_model(best_path, save_opt=True)
                     self.logger.log_save(best_path, save_type='best')
-                    if self.best_checkpoint_path and os.path.exists(self.best_checkpoint_path):
-                        old_best = self.best_checkpoint_path
-                        if old_best != best_path and old_best in self._periodic_checkpoints:
-                            pass
-                        elif old_best != best_path:
+                    if old_best and os.path.exists(old_best) and old_best != best_path:
+                        if old_best not in self._periodic_checkpoints:
                             try:
                                 os.remove(old_best)
                                 self.logger.logger.info(f'[CLEANUP] Removed old best: {old_best}')

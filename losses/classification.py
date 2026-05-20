@@ -23,5 +23,7 @@ class LabelSmoothEntropy(nn.Module):
             return loss.mean()
         elif self.size_average == 'sum':
             return loss.sum()
+        elif self.size_average == 'none':
+            return loss
         else:
             raise NotImplementedError

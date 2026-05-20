@@ -31,6 +31,14 @@ class TransformerDigitsModel(nn.Module):
             nn.Linear(feat_dim // 4, 4),
             nn.Sigmoid()
         )
+        self.length_head = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(feat_dim, 64),
+            nn.ReLU(inplace=True),
+            nn.Dropout(config.dropout),
+            nn.Linear(64, num_heads + 1),
+        )
 
     def _prepare_memory(self, feat):
         B, C, H, W = feat.shape
@@ -67,24 +75,32 @@ class TransformerDigitsModel(nn.Module):
 
     def forward(self, img, gt_bboxes=None):
         feat = self.backbone(img)
+        length_logits = self.length_head(feat)
         memory, H, W = self._prepare_memory(feat)
         B = feat.shape[0]
         queries = self.query_embed.unsqueeze(0).expand(B, -1, -1)
         decoded = self.decoder(queries, memory, tgt_mask=None)
         cls_outs = tuple(self.cls_head(decoded[:, i, :]) for i in range(self.num_heads))
         bbox_outs = tuple(self.bbox_head(decoded[:, i, :]) for i in range(self.num_heads))
-        return cls_outs, bbox_outs
+        return cls_outs, bbox_outs, length_logits
 
     def forward_with_attn(self, img, gt_bboxes=None):
         feat = self.backbone(img)
+        length_logits = self.length_head(feat)
         memory, H, W = self._prepare_memory(feat)
         B = feat.shape[0]
         queries = self.query_embed.unsqueeze(0).expand(B, -1, -1)
         decoded, attn_maps = self._decode_with_attn(queries, memory, tgt_mask=None, H_feat=H, W_feat=W)
         cls_outs = tuple(self.cls_head(decoded[:, i, :]) for i in range(self.num_heads))
         bbox_outs = tuple(self.bbox_head(decoded[:, i, :]) for i in range(self.num_heads))
-        return cls_outs, bbox_outs, attn_maps if attn_maps else None, ()
+        return cls_outs, bbox_outs, attn_maps if attn_maps else None, (), length_logits
 
     def forward_with_probs(self, img):
-        cls_outs, _ = self.forward(img)
-        return tuple(F.softmax(c, dim=1) for c in cls_outs)
+        cls_outs, _, length_logits = self.forward(img)
+        probs = tuple(F.softmax(c, dim=1) for c in cls_outs)
+        pred_length = length_logits.argmax(dim=1)
+        for h in range(self.num_heads):
+            mask = (pred_length <= h).unsqueeze(1).expand_as(probs[h])
+            probs[h] = probs[h].masked_fill(mask, 0.0)
+            probs[h][:, 10] = probs[h][:, 10].masked_fill(mask[:, 10], 1.0)
+        return probs

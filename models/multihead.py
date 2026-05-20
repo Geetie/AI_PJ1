@@ -1,4 +1,3 @@
-import random
 import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
@@ -63,8 +62,8 @@ class PositionAwareAttentionHead(nn.Module):
             attn_per_ch = F.softmax(attn_raw.view(B, self.num_attn_channels, -1), dim=2)
             attn_per_ch = attn_per_ch.view(B, self.num_attn_channels, H, W)
             peak_conf = attn_per_ch.amax(dim=(2, 3))
-            best_k = peak_conf.argmax(dim=1)
-            attn_weights = attn_per_ch[t.arange(B, device=x.device), best_k].unsqueeze(1)
+            soft_weights = F.softmax(peak_conf, dim=1)
+            attn_weights = (soft_weights.unsqueeze(-1).unsqueeze(-1) * attn_per_ch).sum(dim=1, keepdim=True)
         weighted_feat = x * attn_weights
         pooled = self.attn_pool(weighted_feat).flatten(1)
         hidden = self.feat_proj(pooled)
@@ -174,6 +173,14 @@ class DigitsResnet101(nn.Module):
         self.head_fc = nn.ModuleList([
             nn.Linear(config.fc_hidden, class_num) for _ in range(num_heads)
         ])
+        self.length_head = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(config.multiscale_feat_dim, 64),
+            nn.ReLU(inplace=True),
+            nn.Dropout(config.dropout),
+            nn.Linear(64, num_heads + 1),
+        )
 
     @t.compiler.disable
     def _extract_roi_feat(self, feat, bbox_pred, head_idx):
@@ -206,7 +213,7 @@ class DigitsResnet101(nn.Module):
             return cls_outs
         use_gt = False
         if self.training and gt_bboxes is not None and config.roi_teacher_forcing:
-            use_gt = random.random() < self.roi_gt_prob
+            use_gt = t.rand(1).item() < self.roi_gt_prob
         roi_cls = tuple(
             self._extract_roi_feat(feat, gt_bboxes[:, h, :] if use_gt else bbox_outs[h], h)
             for h in range(self.num_heads)
@@ -219,6 +226,7 @@ class DigitsResnet101(nn.Module):
 
     def forward(self, img, gt_bboxes=None):
         feat = self.backbone(img)
+        length_logits = self.length_head(feat)
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         results = []
         use_ckpt = self.training and config.use_gradient_checkpoint and not config.use_torch_compile
@@ -232,10 +240,11 @@ class DigitsResnet101(nn.Module):
         interacted = self.head_interaction(head_feats)
         cls_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
         cls_outs = self._apply_roi_refine(feat, cls_outs, bbox_outs, gt_bboxes)
-        return cls_outs, bbox_outs
+        return cls_outs, bbox_outs, length_logits
 
     def forward_with_attn(self, img, gt_bboxes=None):
         feat = self.backbone(img)
+        length_logits = self.length_head(feat)
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         head_cls_outs, bbox_outs, attn_maps = [], [], []
         head_feats = []
@@ -249,10 +258,11 @@ class DigitsResnet101(nn.Module):
         interacted = self.head_interaction(head_feats)
         cls_list = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
         cls_list = self._apply_roi_refine(feat, cls_list, bbox_tuple, gt_bboxes)
-        return cls_list, bbox_tuple, attn_maps, tuple(head_cls_outs)
+        return cls_list, bbox_tuple, attn_maps, tuple(head_cls_outs), length_logits
 
     def forward_with_probs(self, img):
         feat = self.backbone(img)
+        length_logits = self.length_head(feat)
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         results = [head(feat) for head in self.heads]
         bbox_outs = tuple(r[1] for r in results)
@@ -260,4 +270,10 @@ class DigitsResnet101(nn.Module):
         interacted = self.head_interaction(head_feats)
         cls_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
         cls_outs = self._apply_roi_refine(feat, cls_outs, bbox_outs)
-        return tuple(F.softmax(c, dim=1) for c in cls_outs)
+        probs = tuple(F.softmax(c, dim=1) for c in cls_outs)
+        pred_length = length_logits.argmax(dim=1)
+        for h in range(self.num_heads):
+            mask = (pred_length <= h).unsqueeze(1).expand_as(probs[h])
+            probs[h] = probs[h].masked_fill(mask, 0.0)
+            probs[h][:, 10] = probs[h][:, 10].masked_fill(mask[:, 10], 1.0)
+        return probs

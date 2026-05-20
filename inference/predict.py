@@ -112,7 +112,7 @@ def predicts(model_path, csv_path, use_tta=True, model_type=None, use_compile=Fa
         with t.no_grad():
             for img, img_names in tqdm(test_loader):
                 img = img.to(device)
-                pred_cls, _ = res_net(img)
+                pred_cls, _, _ = res_net(img)
                 results += [[name, code] for name, code in zip(img_names, parse2class(pred_cls))]
 
     results = sorted(results, key=lambda x: x[0])

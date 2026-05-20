@@ -4,6 +4,7 @@ import json
 import random
 import time
 import threading
+import numpy as np
 import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,6 +23,7 @@ from utils.compile_utils import (
     try_compile_model, warmup_model, get_raw_model, configure_dynamo_cache,
     CompileLogger, configure_compile_cache
 )
+from utils.seed import make_epoch_generator
 
 
 def _compute_joint_acc(pred_heads, labels, true_lengths, num_heads):
@@ -46,6 +48,14 @@ def _compute_char_acc(pred_heads, labels, true_lengths, num_heads):
             corrects += ((pred_heads[h].argmax(1) == 10) * empty_mask).sum().item()
         total_chars += len(labels)
     return corrects, total_chars
+
+
+def _apply_length_mask(pred_cls, length_logits, num_heads):
+    pred_length = length_logits.argmax(dim=1)
+    for h in range(num_heads):
+        mask = (pred_length <= h)
+        if mask.any():
+            pred_cls[h][mask, 10] = pred_cls[h][mask].amax(dim=1) + 100.0
 
 
 class MultiHeadTrainer(BaseTrainer):
@@ -106,6 +116,15 @@ class MultiHeadTrainer(BaseTrainer):
             self.logger.logger.info(f'Load model from {config.pretrained}')
 
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
+        if config.pretrained is not None and not config.resume_weights_only:
+            if 'model' in ckpt:
+                try:
+                    self.ema.ema.load_state_dict(ckpt['model'], strict=False)
+                    self.logger.logger.info('[CKPT] Restored EMA shadow model from checkpoint')
+                except Exception as e:
+                    self.logger.logger.warning(f'[CKPT] Failed to restore EMA shadow model: {e}')
+            if 'best_checkpoint_path' in ckpt:
+                self.best_checkpoint_path = ckpt['best_checkpoint_path']
         self._compile_logger = CompileLogger.get_instance()
         if config.use_torch_compile and t.cuda.is_available():
             configure_dynamo_cache()
@@ -137,7 +156,7 @@ class MultiHeadTrainer(BaseTrainer):
 
         self.head_criteria = nn.ModuleList()
         for h in range(config.num_heads):
-            self.head_criteria.append(LabelSmoothEntropy(smooth=config.smooth, class_weights=class_weights))
+            self.head_criteria.append(LabelSmoothEntropy(smooth=config.smooth, class_weights=class_weights, size_average='none'))
 
         backbone_params = list(get_raw_model(self.model).backbone.parameters())
         other_params = [p for n, p in get_raw_model(self.model).named_parameters()
@@ -167,7 +186,11 @@ class MultiHeadTrainer(BaseTrainer):
                 config.start_epoch = 0
                 self._current_epoch = 0
                 self.patience_counter = 0
-                self.logger.logger.info(f'[CKPT] resume_weights_only: best_acc={self.best_acc * 100:.2f}%, '
+                self.best_acc = 0
+                self.train_log = []
+                if 'best_checkpoint_path' in ckpt:
+                    self.best_checkpoint_path = ckpt['best_checkpoint_path']
+                self.logger.logger.info(f'[CKPT] resume_weights_only: best_acc reset to 0%, '
                                        f'starting from epoch 1 with fresh '
                                        f'{config.optimizer_type} optimizer and {config.scheduler_type} scheduler')
             else:
@@ -194,16 +217,22 @@ class MultiHeadTrainer(BaseTrainer):
                         self.logger.logger.warning(f'Failed to restore scaler: {e}. Using new scaler.')
                 if 'patience_counter' in ckpt:
                     self.patience_counter = ckpt['patience_counter']
+                if 'best_checkpoint_path' in ckpt:
+                    self.best_checkpoint_path = ckpt['best_checkpoint_path']
                 self.logger.logger.info(f'Restored best_acc: {self.best_acc * 100:.2f}%, '
                                        f'start_epoch: {config.start_epoch}, '
                                        f'patience: {self.patience_counter}/{config.early_stopping_patience}')
 
         self._gpu_warmup()
 
+        self._base_seed = 42
+        self._train_generator = make_epoch_generator(self._base_seed, epoch=0)
+
         self.train_set = DigitsDataset(mode='train', aug=True,
                                        input_size=(config.input_height, config.input_width))
         self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
-                                              shuffle=True, drop_last=True)
+                                              shuffle=True, drop_last=True,
+                                              generator=self._train_generator)
         if val:
             self.val_set = DigitsDataset(mode='val', aug=False,
                                          input_size=(config.input_height, config.input_width))
@@ -215,32 +244,11 @@ class MultiHeadTrainer(BaseTrainer):
         self._diagnose_dataloader()
 
     def _diagnose_dataloader(self):
-        self.logger.logger.info('[DIAG] Testing DataLoader first batch load...')
-        diag_start = time.time()
-        try:
-            sample_batch = next(iter(self.train_loader))
-            diag_time = time.time() - diag_start
-            img_shape = sample_batch[0].shape
-            self.logger.logger.info(f'[DIAG] First batch loaded in {diag_time:.2f}s, img_shape={img_shape}')
-            if diag_time > 30:
-                self.logger.logger.warning(f'[DIAG] Data loading is very slow ({diag_time:.1f}s). '
-                      f'Consider reducing num_workers or checking disk I/O.')
-            del sample_batch
-        except Exception as e:
-            diag_time = time.time() - diag_start
-            self.logger.logger.error(f'[DIAG] DataLoader test FAILED after {diag_time:.2f}s: {e}')
-            if config.num_workers > 0:
-                self.logger.logger.warning('[DIAG] Falling back to num_workers=0 due to DataLoader failure')
-                config.num_workers = 0
-                config.prefetch_factor = None
-                config.persistent_workers = False
-                config.multiprocessing_context = None
-                self._original_num_workers = config.num_workers
-                self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
-                                                      shuffle=True, drop_last=True)
-                if self.val_loader is not None:
-                    self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
-                                                        shuffle=False, drop_last=False)
+        self.logger.logger.info('[DIAG] Dataset sizes: train=%d, val=%s',
+                                len(self.train_set),
+                                len(self.val_set) if self.val_set is not None else 'N/A')
+        self.logger.logger.info('[DIAG] DataLoader config: batch=%d, workers=%d, persistent=%s',
+                                config.batch_size, config.num_workers, config.persistent_workers)
 
     def _gpu_warmup(self):
         if not t.cuda.is_available():
@@ -378,39 +386,54 @@ class MultiHeadTrainer(BaseTrainer):
                 class_counts[d] += 1
             for _ in range(config.num_heads - len(digits)):
                 class_counts[10] += 1
-        class_weights = 1.0 / (class_counts + 1e-6)
-        class_weights[10] = 0.0
-        active = class_weights[:10]
-        class_weights[:10] = active * config.class_num / active.sum()
+        total = class_counts.sum()
+        class_weights = total / (class_counts * config.class_num + 1e-6)
+        class_weights = class_weights / class_weights.mean()
         class_weights = class_weights.to(self.device)
         self.logger.logger.info(f'Computed class weights from JSON: {class_weights.cpu().numpy()}')
-        self.logger.logger.info(f'   Class 10 (empty) weight: {class_weights[10].item():.3f} (excluded from loss)')
+        self.logger.logger.info(f'   Class 10 (empty) weight: {class_weights[10].item():.4f}')
         return class_weights
 
-    def _make_loader(self, dataset, batch_size, shuffle=False, drop_last=False, collate_fn=None):
+    @staticmethod
+    def _worker_init_fn(worker_id):
+        worker_seed = t.initial_seed() % (2**32)
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
+    def _make_loader(self, dataset, batch_size, shuffle=False, drop_last=False, collate_fn=None, generator=None, persistent_override=None):
         kwargs = dict(
             batch_size=batch_size, shuffle=shuffle,
             num_workers=config.num_workers, pin_memory=config.pin_memory,
             drop_last=drop_last,
         )
+        if shuffle and generator is not None:
+            kwargs['generator'] = generator
+        pw = persistent_override if persistent_override is not None else config.persistent_workers
         if config.num_workers > 0:
             kwargs['prefetch_factor'] = config.prefetch_factor
-            kwargs['persistent_workers'] = config.persistent_workers
+            kwargs['persistent_workers'] = pw
+            kwargs['worker_init_fn'] = self._worker_init_fn
         if config.multiprocessing_context is not None and config.num_workers > 0:
             kwargs['multiprocessing_context'] = config.multiprocessing_context
         if collate_fn is not None:
             kwargs['collate_fn'] = collate_fn
         self.logger.logger.info(f'[DataLoader] batch={batch_size}, workers={config.num_workers}, '
               f'pin_mem={config.pin_memory}, ctx={config.multiprocessing_context}, '
-              f'persistent={config.persistent_workers}, dataset={len(dataset)}')
+              f'persistent={pw}, dataset={len(dataset)}, '
+              f'generator={"epoch_seeded" if generator is not None else "global_rng"}')
         return DataLoader(dataset, **kwargs)
 
     def _pre_epoch_hook(self, epoch):
+        epoch_seed = self._base_seed + epoch * 1000
+        random.seed(epoch_seed)
+        np.random.seed(epoch_seed)
+        t.manual_seed(epoch_seed)
+        if t.cuda.is_available():
+            t.cuda.manual_seed_all(epoch_seed)
+
         raw_model = self._get_raw_model()
         if hasattr(raw_model, 'set_roi_gt_prob'):
-            if self._loaded_from_checkpoint and config.resume_weights_only and epoch < 1:
-                raw_model.set_roi_gt_prob(0.5)
-            elif epoch < config.warmup_epochs:
+            if epoch < config.warmup_epochs:
                 raw_model.set_roi_gt_prob(1.0)
             else:
                 decay_end = int(config.epoches * 0.6)
@@ -419,6 +442,16 @@ class MultiHeadTrainer(BaseTrainer):
                 else:
                     progress = (epoch - config.warmup_epochs) / max(decay_end - config.warmup_epochs, 1)
                     raw_model.set_roi_gt_prob(1.0 - progress)
+
+        self._cleanup_dataloader(self.train_loader)
+        self._train_generator = make_epoch_generator(self._base_seed, epoch=epoch)
+        self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
+                                              shuffle=True, drop_last=True,
+                                              generator=self._train_generator,
+                                              persistent_override=False)
+        self.logger.logger.info(
+            f'[EPOCH-PRE] epoch={epoch+1} lr={self.optimizer.param_groups[0]["lr"]:.8f} '
+            f'roi_gt_prob={raw_model.roi_gt_prob:.2f} generator_seed={self._base_seed + epoch}')
 
     def _cleanup_dataloader(self, loader):
         if loader is not None:
@@ -433,7 +466,9 @@ class MultiHeadTrainer(BaseTrainer):
         self._cleanup_dataloader(self.train_loader)
         self._cleanup_dataloader(self.val_loader)
         self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
-                                              shuffle=True, drop_last=True)
+                                              shuffle=True, drop_last=True,
+                                              generator=self._train_generator,
+                                              persistent_override=False)
         if self.val_loader is not None:
             self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
                                                 shuffle=False, drop_last=False)
@@ -448,6 +483,7 @@ class MultiHeadTrainer(BaseTrainer):
         self.model.train()
         first_batch = True
         data_load_time = 0.0
+        scaler_skipped = False
 
         print(f'[EPOCH {epoch+1}] Waiting for first batch from DataLoader...')
         t_load_start = time.time()
@@ -469,7 +505,7 @@ class MultiHeadTrainer(BaseTrainer):
 
             t1 = time.time()
 
-            if config.cutmix_prob > 0 and random.random() < config.cutmix_prob and config.cutmix_alpha > 0:
+            if config.cutmix_prob > 0 and t.rand(1).item() < config.cutmix_prob and config.cutmix_alpha > 0:
                 img, label_a, label_b, bbox_a, bbox_b, mask_a, mask_b, lam = cutmix_data(
                     img, label, bbox_target, bbox_mask, alpha=config.cutmix_alpha)
                 use_cutmix = True
@@ -483,71 +519,71 @@ class MultiHeadTrainer(BaseTrainer):
                 lam = 1.0
                 use_cutmix = False
 
-            if (i + 1) % config.grad_accum_steps == 1:
+            if i % config.grad_accum_steps == 0:
                 self.optimizer.zero_grad()
 
             with autocast(self.device.type, enabled=self.use_amp):
-                pred, pred_bboxes, attn_maps, head_cls_outs = self.model.forward_with_attn(img, gt_bboxes=bbox_target)
+                pred, pred_bboxes, attn_maps, head_cls_outs, length_logits = self.model.forward_with_attn(img, gt_bboxes=bbox_target)
                 if first_batch:
                     t.cuda.synchronize()
                     print(f'[BATCH0] forward: {time.time()-t1:.2f}s, gpu_transfer: {t_gpu-t0:.2f}s, img={img.shape}')
 
                 true_lengths = bbox_mask.sum(dim=1).long()
 
-                cls_loss = t.tensor(0.0, device=self.device)
+                cls_loss = t.tensor(0.0, device=self.device, requires_grad=True)
                 for h in range(config.num_heads):
-                    valid_mask = (true_lengths > h).float()
-                    empty_mask = 1.0 - valid_mask
                     if use_cutmix:
                         head_loss_a = self.head_criteria[h](pred[h], label_a[:, h])
                         head_loss_b = self.head_criteria[h](pred[h], label_b[:, h])
                         head_loss = lam * head_loss_a + (1 - lam) * head_loss_b
                     else:
                         head_loss = self.head_criteria[h](pred[h], label[:, h])
-                    if valid_mask.sum() > 0:
-                        cls_loss = cls_loss + (head_loss * valid_mask).sum() / valid_mask.sum()
-                    if empty_mask.sum() > 0:
-                        empty_loss = F.cross_entropy(pred[h], t.full((pred[h].size(0),), 10, device=self.device, dtype=t.long), reduction='none')
-                        cls_loss = cls_loss + (empty_loss * empty_mask).sum() / empty_mask.sum() * 0.5
+                    cls_loss = cls_loss + head_loss.mean()
 
-                div_loss = attention_diversity_loss(attn_maps)
-                ord_loss = spatial_ordering_loss(attn_maps, bbox_preds=pred_bboxes, bbox_mask=bbox_mask)
-                attn_sup_loss = self.attn_supervision(attn_maps, bbox_target, bbox_mask)
-                bbox_loss = t.tensor(0.0, device=self.device)
-                valid_bbox_sum = (bbox_target * bbox_mask.unsqueeze(-1)).sum(dim=1)
-                valid_bbox_count = bbox_mask.sum(dim=1, keepdim=True).clamp(min=1)
-                mean_bbox = valid_bbox_sum / valid_bbox_count
-                for h in range(config.num_heads):
-                    mask = bbox_mask[:, h]
-                    if mask.sum() > 0:
-                        if use_cutmix:
-                            bbox_loss_a = F.smooth_l1_loss(
-                                pred_bboxes[h][mask_a[:, h] > 0], bbox_a[:, h, :][mask_a[:, h] > 0])
-                            bbox_loss_b = F.smooth_l1_loss(
-                                pred_bboxes[h][mask_b[:, h] > 0], bbox_b[:, h, :][mask_b[:, h] > 0])
-                            bbox_loss_h = lam * bbox_loss_a + (1 - lam) * bbox_loss_b
-                        else:
+                if use_cutmix:
+                    div_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    attn_sup_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    ord_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    bbox_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                else:
+                    div_loss = attention_diversity_loss(attn_maps)
+                    attn_sup_loss = self.attn_supervision(attn_maps, bbox_target, bbox_mask)
+                    ord_loss = spatial_ordering_loss(attn_maps, bbox_preds=pred_bboxes, bbox_mask=bbox_mask)
+                    bbox_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    valid_bbox_sum = (bbox_target * bbox_mask.unsqueeze(-1)).sum(dim=1)
+                    valid_bbox_count = bbox_mask.sum(dim=1, keepdim=True).clamp(min=1)
+                    mean_bbox = valid_bbox_sum / valid_bbox_count
+                    for h in range(config.num_heads):
+                        mask = bbox_mask[:, h]
+                        if mask.sum() > 0:
                             bbox_loss_h = F.smooth_l1_loss(
                                 pred_bboxes[h][mask > 0], bbox_target[:, h, :][mask > 0])
-                        bbox_loss = bbox_loss + bbox_loss_h
-                    else:
-                        empty_mask = (mask == 0)
-                        if empty_mask.sum() > 0:
-                            bbox_loss = bbox_loss + F.smooth_l1_loss(
-                                pred_bboxes[h][empty_mask], mean_bbox[empty_mask].detach()) * 0.3
+                            bbox_loss = bbox_loss + bbox_loss_h
+                        else:
+                            empty_mask_h = (mask == 0)
+                            if empty_mask_h.sum() > 0:
+                                bbox_loss = bbox_loss + F.smooth_l1_loss(
+                                    pred_bboxes[h][empty_mask_h], mean_bbox[empty_mask_h].detach()) * 0.3
                 loss = (config.cls_loss_weight * cls_loss + config.bbox_loss_weight * bbox_loss
                         + config.attn_diversity_weight * div_loss
                         + config.ordering_loss_weight * ord_loss
                         + config.attn_supervision_weight * attn_sup_loss)
 
-                aux_loss = t.tensor(0.0, device=self.device)
+                aux_loss = t.tensor(0.0, device=self.device, requires_grad=True)
                 if len(head_cls_outs) > 0:
                     for h in range(config.num_heads):
-                        valid_mask = (true_lengths > h).float()
-                        if valid_mask.sum() > 0:
+                        if use_cutmix:
+                            aux_loss_a = self.head_criteria[h](head_cls_outs[h], label_a[:, h])
+                            aux_loss_b = self.head_criteria[h](head_cls_outs[h], label_b[:, h])
+                            aux_loss_h = lam * aux_loss_a + (1 - lam) * aux_loss_b
+                        else:
                             aux_loss_h = self.head_criteria[h](head_cls_outs[h], label[:, h])
-                            aux_loss = aux_loss + (aux_loss_h * valid_mask).sum() / valid_mask.sum()
+                        aux_loss = aux_loss + aux_loss_h.mean()
                 loss = loss + config.aux_loss_weight * aux_loss
+                length_target = true_lengths.clamp(max=config.num_heads)
+                length_loss = F.cross_entropy(length_logits, length_target)
+                length_loss_weight = 0.5 * min(1.0, (epoch + 1) / max(config.warmup_epochs, 1))
+                loss = loss + length_loss_weight * length_loss
                 loss = loss / config.grad_accum_steps
 
             self.scaler.scale(loss).backward()
@@ -558,9 +594,10 @@ class MultiHeadTrainer(BaseTrainer):
                     t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=config.grad_clip_max_norm)
                 else:
                     t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
-                self.scaler.step(self.optimizer)
+                step_result = self.scaler.step(self.optimizer)
+                if step_result is None:
+                    scaler_skipped = True
                 self.scaler.update()
-                self.optimizer.zero_grad()
                 self.ema.update(self.model)
             if first_batch:
                 t.cuda.synchronize()
@@ -599,6 +636,9 @@ class MultiHeadTrainer(BaseTrainer):
 
         self._last_train_joint_acc = joint_corrects * 100 / max(joint_total, 1)
         self._last_train_char_acc = char_corrects * 100 / max(total_chars, 1)
+        if scaler_skipped:
+            self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: scaler.step() skipped at least once '
+                                       f'(inf/nan gradients), model may not be learning')
         return self._last_train_joint_acc
 
     def _eval(self):
@@ -622,7 +662,8 @@ class MultiHeadTrainer(BaseTrainer):
                         img = img.to(self.device)
                         label = label.to(self.device)
                         bbox_mask = bbox_mask.to(self.device)
-                        pred_cls, _ = model(img)
+                        pred_cls, _, length_logits = model(img)
+                        _apply_length_mask(pred_cls, length_logits, config.num_heads)
 
                         true_lengths = bbox_mask.sum(dim=1).long()
                         c_corrects, c_total = _compute_char_acc(pred_cls, label, true_lengths, config.num_heads)
@@ -681,7 +722,8 @@ class MultiHeadTrainer(BaseTrainer):
                 img = img.to(self.device)
                 label = label.to(self.device)
                 bbox_mask = bbox_mask.to(self.device)
-                pred_cls, _ = model(img)
+                pred_cls, _, length_logits = model(img)
+                _apply_length_mask(pred_cls, length_logits, config.num_heads)
 
                 true_lengths = bbox_mask.sum(dim=1).long()
 
