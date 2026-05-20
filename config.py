@@ -68,8 +68,12 @@ COMPILE_AVAILABLE = COMPILE_AVAILABLE
 # ==================== 训练配置类 ====================
 class Config:
     """所有超参数配置"""
-    # 基础训练参数
-    batch_size = 128  # 统一为baseline.py的128
+    # =========================================================
+    # ⚠️ 显存限制：batch_size 固定为 64，禁止修改！
+    # 22GB GPU + AMP 训练 FPN MultiHead 模型，batch_size=128 会 OOM
+    # batch_size=64 + grad_accum_steps=4 → effective batch=256
+    # =========================================================
+    batch_size = 64
     eval_batch_size = 96
     lr = 2e-3
     backbone_lr_factor = 0.1
@@ -81,7 +85,8 @@ class Config:
     scheduler_type = 'warm_restarts'
     
     # 梯度累积与裁剪
-    grad_accum_steps = 2
+    # batch_size=64 → effective batch = 64 * 4 = 256，与 batch=128 时一致
+    grad_accum_steps = 4
     grad_clip_max_norm = 5.0
     
     # Loss权重
