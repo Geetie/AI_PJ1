@@ -273,13 +273,15 @@ class TrainingLogger:
         self.logger.info(msg)
 
     def log_epoch_end(self, epoch, train_acc, val_acc, lr, is_best=False, patience_counter=0,
-                      char_acc=None):
+                      char_acc=None, digit_acc=None):
         epoch_time = time.time() - self.epoch_start_time
         mins, secs = divmod(int(epoch_time), 60)
         msg = f'[EPOCH] Epoch={epoch + 1}/{config.epoches} ' \
               f'train_acc={train_acc:.2f}% val_joint={val_acc:.2f}%'
         if char_acc is not None:
             msg += f' val_char={char_acc:.2f}%'
+        if digit_acc is not None:
+            msg += f' val_digit={digit_acc:.2f}%'
         msg += f' lr={lr:.8f} epoch_time={mins}m{secs:02d}s'
         if t.cuda.is_available():
             msg += f' gpu_peak={self.gpu_peak_mem:.1f}GB'
@@ -522,7 +524,7 @@ class BaseTrainer:
                 self.lr_scheduler.step()
 
             if hasattr(self, '_post_reset_warmup_epochs') and self._post_reset_warmup_epochs > 0:
-                total_warmup = 3
+                total_warmup = 10
                 progress = 1.0 - (self._post_reset_warmup_epochs / total_warmup)
                 for pg, start_lr, target_lr in zip(
                         self.optimizer.param_groups,
@@ -558,6 +560,7 @@ class BaseTrainer:
                 if 'out of memory' in err_msg and self._oom_retry_count < 3:
                     self._oom_retry_count += 1
                     old_bs = config.batch_size
+                    old_grad_accum = config.grad_accum_steps
                     t.cuda.empty_cache()
                     peak_gb = t.cuda.max_memory_allocated() / (1024**3)
                     gpu_props = t.cuda.get_device_properties(0)
@@ -570,12 +573,15 @@ class BaseTrainer:
                         config.batch_size = max(int(config.batch_size * 0.75), 16)
                     config.grad_accum_steps = max(-(-self._original_effective_batch_size // config.batch_size), 1)
                     self._stable_batch_size = None
+                    new_effective_bs = config.batch_size * config.grad_accum_steps
+                    old_effective_bs = old_bs * old_grad_accum
+                    lr_scale = new_effective_bs / old_effective_bs
                     self.logger.logger.warning(
                         f'[OOM] Reducing batch_size {old_bs} -> {config.batch_size}, '
                         f'peak={peak_gb:.1f}GB/{total_gb:.1f}GB, '
                         f'headroom={headroom:.1f}GB, '
-                        f'grad_accum_steps={config.grad_accum_steps} (retry {self._oom_retry_count})')
-                    lr_scale = config.batch_size / old_bs
+                        f'grad_accum_steps={old_grad_accum}->{config.grad_accum_steps}, '
+                        f'effective_bs={old_effective_bs}->{new_effective_bs} (retry {self._oom_retry_count})')
                     for pg in self.optimizer.param_groups:
                         old_lr = pg['lr']
                         pg['lr'] = pg['lr'] * lr_scale
@@ -628,13 +634,22 @@ class BaseTrainer:
                         recovery_step = 8
                     new_bs = min(config.batch_size + recovery_step, self._stable_batch_size)
                     if new_bs != config.batch_size:
+                        old_bs = config.batch_size
+                        old_grad_accum = config.grad_accum_steps
                         config.batch_size = new_bs
                         config.grad_accum_steps = max(-(-self._original_effective_batch_size // config.batch_size), 1)
+                        new_effective_bs = config.batch_size * config.grad_accum_steps
+                        old_effective_bs = old_bs * old_grad_accum
+                        lr_scale = new_effective_bs / old_effective_bs
+                        for pg in self.optimizer.param_groups:
+                            pg['lr'] = pg['lr'] * lr_scale
                         self._stable_epoch_count = 0
                         self.logger.logger.info(
                             f'[RECOVER] Increasing batch_size to {config.batch_size} '
                             f'(usage_ratio={usage_ratio:.2f}, step={recovery_step}), '
-                            f'grad_accum_steps={config.grad_accum_steps}')
+                            f'grad_accum_steps={old_grad_accum}->{config.grad_accum_steps}, '
+                            f'effective_bs={old_effective_bs}->{new_effective_bs}, '
+                            f'lr_scale={lr_scale:.3f}')
                         self._cleanup_dataloader(self.train_loader)
                         self._rebuild_dataloaders()
                 else:
@@ -651,17 +666,23 @@ class BaseTrainer:
                 is_best = acc > self.best_acc
                 train_joint = train_acc
                 train_char = getattr(self, '_last_train_char_acc', None)
+                train_digit = getattr(self, '_last_train_digit_acc', None)
+                val_digit = getattr(self, '_last_val_digit_acc', None)
                 self.train_log.append({
                     'epoch': epoch + 1,
                     'train_joint_acc': train_joint,
                     'train_char_acc': train_char,
+                    'train_digit_acc': train_digit,
                     'val_joint_acc': acc * 100,
                     'val_char_acc': char_acc_val * 100 if char_acc_val is not None else None,
+                    'val_digit_acc': val_digit * 100 if val_digit is not None else None,
                     'lr': current_lr
                 })
                 self._check_early_stopping(acc, epoch)
                 self.logger.log_epoch_end(epoch, train_acc, acc * 100, current_lr, is_best,
-                                          self.patience_counter, char_acc=char_acc_val * 100 if char_acc_val is not None else None)
+                                          self.patience_counter,
+                                          char_acc=char_acc_val * 100 if char_acc_val is not None else None,
+                                          digit_acc=val_digit * 100 if val_digit is not None else None)
                 os.makedirs(config.checkpoints, exist_ok=True)
 
                 if is_best:

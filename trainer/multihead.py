@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 from config import config, data_dir
 from data.dataset import DigitsDataset
 from models import create_model
-from losses.classification import LabelSmoothEntropy
+from losses.classification import LabelSmoothEntropy, FocalLoss
 from losses.attention import AttentionSupervisionLoss, attention_diversity_loss, spatial_ordering_loss
 from losses.augmentation import cutmix_data
 from trainer.base import BaseTrainer, ModelEMA, _load_state_dict_compat
@@ -39,15 +39,20 @@ def _compute_joint_acc(pred_heads, labels, true_lengths, num_heads):
 def _compute_char_acc(pred_heads, labels, true_lengths, num_heads):
     corrects = 0
     total_chars = 0
+    digit_corrects = 0
+    digit_total = 0
     for h in range(num_heads):
         valid_mask = (true_lengths > h)
         if valid_mask.sum() > 0:
-            corrects += ((pred_heads[h].argmax(1) == labels[:, h]) * valid_mask).sum().item()
+            head_correct = (pred_heads[h].argmax(1) == labels[:, h]) * valid_mask
+            corrects += head_correct.sum().item()
+            digit_corrects += head_correct.sum().item()
+        digit_total += valid_mask.sum().item()
         empty_mask = ~valid_mask
         if empty_mask.sum() > 0:
             corrects += ((pred_heads[h].argmax(1) == 10) * empty_mask).sum().item()
         total_chars += len(labels)
-    return corrects, total_chars
+    return corrects, total_chars, digit_corrects, digit_total
 
 
 def _apply_length_mask(pred_cls, length_logits, num_heads):
@@ -156,6 +161,7 @@ class MultiHeadTrainer(BaseTrainer):
             })
 
         self.attn_supervision = AttentionSupervisionLoss()
+        self.length_criterion = FocalLoss(gamma=2.0)
 
         class_weights = self._compute_class_weights()
 
@@ -226,11 +232,11 @@ class MultiHeadTrainer(BaseTrainer):
                                        f'patience: {self.patience_counter}/{config.early_stopping_patience}')
 
         if self._optimizer_state_lost:
-            self._post_reset_warmup_epochs = 3
+            self._post_reset_warmup_epochs = 10
             self._warmup_target_lrs = [pg['lr'] for pg in self.optimizer.param_groups]
-            self._warmup_start_lrs = [pg['lr'] * 0.1 for pg in self.optimizer.param_groups]
+            self._warmup_start_lrs = [pg['lr'] * 0.05 for pg in self.optimizer.param_groups]
             for pg in self.optimizer.param_groups:
-                pg['lr'] = pg['lr'] * 0.1
+                pg['lr'] = pg['lr'] * 0.05
             self.logger.logger.info(
                 f'[CKPT] Optimizer state lost, scheduling {self._post_reset_warmup_epochs}-epoch warmup '
                 f'from LR={self.optimizer.param_groups[0]["lr"]:.8f}')
@@ -401,10 +407,10 @@ class MultiHeadTrainer(BaseTrainer):
         total = class_counts.sum()
         class_weights = total / (class_counts * config.class_num + 1e-6)
         class_weights = class_weights / class_weights.mean()
-        class_weights[10] = max(class_weights[10].item(), 0.5)
+        class_weights[10] = max(class_weights[10].item(), 0.3)
         class_weights = class_weights.to(self.device)
         self.logger.logger.info(f'Computed class weights from JSON: {class_weights.cpu().numpy()}')
-        self.logger.logger.info(f'   Class 10 (empty) weight: {class_weights[10].item():.4f} (floored at 0.5)')
+        self.logger.logger.info(f'   Class 10 (empty) weight: {class_weights[10].item():.4f} (floored at 0.3)')
         return class_weights
 
     @staticmethod
@@ -491,6 +497,8 @@ class MultiHeadTrainer(BaseTrainer):
         joint_total = 0
         char_corrects = 0
         total_chars = 0
+        digit_corrects = 0
+        digit_total = 0
         batch_start = time.time()
         self.model.train()
         first_batch = True
@@ -600,8 +608,8 @@ class MultiHeadTrainer(BaseTrainer):
                         aux_loss = aux_loss + aux_loss_h.mean()
                 loss = loss + config.aux_loss_weight * aux_loss
                 length_target = true_lengths.clamp(max=config.num_heads)
-                length_loss = F.cross_entropy(length_logits, length_target)
-                length_loss_weight = 0.5 * min(1.0, (epoch + 1) / max(config.warmup_epochs, 1))
+                length_loss = self.length_criterion(length_logits, length_target)
+                length_loss_weight = 1.0 * min(1.0, (epoch + 1) / max(config.warmup_epochs, 1))
                 loss = loss + length_loss_weight * length_loss
                 loss = loss / config.grad_accum_steps
 
@@ -632,18 +640,21 @@ class MultiHeadTrainer(BaseTrainer):
                 pred_masked = [p.clone() for p in pred]
                 _apply_length_mask(pred_masked, length_logits, config.num_heads)
                 joint_corrects += _compute_joint_acc(pred_masked, label, true_lengths, config.num_heads)
-                c_corrects, c_total = _compute_char_acc(pred_masked, label, true_lengths, config.num_heads)
+                c_corrects, c_total, d_corrects, d_total = _compute_char_acc(pred_masked, label, true_lengths, config.num_heads)
                 char_corrects += c_corrects
                 total_chars += c_total
+                digit_corrects += d_corrects
+                digit_total += d_total
 
             tbar.set_description(
-                'Epoch %d, loss: %.3f, joint: %.3f, char: %.3f' % (
+                'Epoch %d, loss: %.3f, joint: %.3f, char: %.3f, digit: %.3f' % (
                     epoch + 1, total_loss / (i + 1),
                     joint_corrects * 100 / max(joint_total, 1),
-                    char_corrects * 100 / max(total_chars, 1)))
+                    char_corrects * 100 / max(total_chars, 1),
+                    digit_corrects * 100 / max(digit_total, 1)))
 
             if (i + 1) % config.print_interval == 0:
-                acc_str = f'joint={joint_corrects * 100 / max(joint_total, 1):.2f}% char={char_corrects * 100 / max(total_chars, 1):.2f}%'
+                acc_str = f'joint={joint_corrects * 100 / max(joint_total, 1):.2f}% char={char_corrects * 100 / max(total_chars, 1):.2f}% digit={digit_corrects * 100 / max(digit_total, 1):.2f}%'
                 self.logger.log_batch(epoch, i, len(self.train_loader),
                                       total_loss / (i + 1), self.optimizer.param_groups[0]['lr'],
                                       acc_str,
@@ -655,6 +666,7 @@ class MultiHeadTrainer(BaseTrainer):
 
         self._last_train_joint_acc = joint_corrects * 100 / max(joint_total, 1)
         self._last_train_char_acc = char_corrects * 100 / max(total_chars, 1)
+        self._last_train_digit_acc = digit_corrects * 100 / max(digit_total, 1)
         self._last_epoch_avg_loss = total_loss / max(len(self.train_loader), 1)
         if scaler_skipped:
             self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: scaler.step() skipped at least once '
@@ -672,6 +684,8 @@ class MultiHeadTrainer(BaseTrainer):
         for attempt in range(max_retries):
             char_corrects = 0
             total_chars = 0
+            digit_corrects = 0
+            digit_total = 0
             joint_corrects = 0
             joint_total = 0
             length_corrects = 0
@@ -688,9 +702,11 @@ class MultiHeadTrainer(BaseTrainer):
                         _apply_length_mask(pred_cls, length_logits, config.num_heads)
 
                         true_lengths = bbox_mask.sum(dim=1).long()
-                        c_corrects, c_total = _compute_char_acc(pred_cls, label, true_lengths, config.num_heads)
+                        c_corrects, c_total, d_corrects, d_total = _compute_char_acc(pred_cls, label, true_lengths, config.num_heads)
                         char_corrects += c_corrects
                         total_chars += c_total
+                        digit_corrects += d_corrects
+                        digit_total += d_total
 
                         joint_corrects += _compute_joint_acc(pred_cls, label, true_lengths, config.num_heads)
                         joint_total += img.size(0)
@@ -700,8 +716,9 @@ class MultiHeadTrainer(BaseTrainer):
                         length_corrects += (pred_length == clamped_true).sum().item()
                         length_total += img.size(0)
 
-                        tbar.set_description('Val Char: %.2f%% Joint: %.2f%%' % (
+                        tbar.set_description('Val Char: %.2f%% Digit: %.2f%% Joint: %.2f%%' % (
                             char_corrects * 100 / max(total_chars, 1),
+                            digit_corrects * 100 / max(digit_total, 1),
                             joint_corrects * 100 / max(joint_total, 1)))
 
                         del img, label, pred_cls
@@ -725,12 +742,14 @@ class MultiHeadTrainer(BaseTrainer):
         self.model.train()
 
         char_acc = char_corrects / max(total_chars, 1)
+        digit_acc = digit_corrects / max(digit_total, 1)
         joint_acc = joint_corrects / max(joint_total, 1)
         self._last_val_char_acc = char_acc
+        self._last_val_digit_acc = digit_acc
         self._last_val_joint_acc = joint_acc
         length_acc = length_corrects / max(length_total, 1)
-        print(f'  Char Acc: {char_acc * 100:.2f}%  |  Joint Acc: {joint_acc * 100:.2f}%  |  Length Acc: {length_acc * 100:.2f}%')
-        self.logger.logger.info(f'[EVAL] length_acc={length_acc * 100:.2f}% ({length_corrects}/{length_total})')
+        print(f'  Char Acc: {char_acc * 100:.2f}%  |  Digit Acc: {digit_acc * 100:.2f}%  |  Joint Acc: {joint_acc * 100:.2f}%  |  Length Acc: {length_acc * 100:.2f}%')
+        self.logger.logger.info(f'[EVAL] length_acc={length_acc * 100:.2f}% ({length_corrects}/{length_total}) digit_acc={digit_acc * 100:.2f}% ({digit_corrects}/{digit_total})')
 
         return joint_acc
 
@@ -761,7 +780,7 @@ class MultiHeadTrainer(BaseTrainer):
                     head_corrects[h] += ((pred_cls[h].argmax(1) == label[:, h]) * valid_mask).sum().item()
                     head_totals[h] += valid_mask.sum().item()
 
-                c_corrects, c_total = _compute_char_acc(pred_cls, label, true_lengths, config.num_heads)
+                c_corrects, c_total, d_corrects, d_total = _compute_char_acc(pred_cls, label, true_lengths, config.num_heads)
                 char_corrects += c_corrects
                 total_chars += c_total
 
@@ -817,12 +836,13 @@ class MultiHeadTrainer(BaseTrainer):
         pred_heads = [all_probs[h].argmax(1) for h in range(config.num_heads)]
         true_lengths = all_bbox_mask.sum(dim=1).long()
 
-        char_corrects, total_chars = _compute_char_acc(pred_heads, all_labels, true_lengths, config.num_heads)
+        char_corrects, total_chars, digit_corrects, digit_total = _compute_char_acc(pred_heads, all_labels, true_lengths, config.num_heads)
         char_acc = char_corrects / max(total_chars, 1)
+        digit_acc = digit_corrects / max(digit_total, 1)
 
         joint_corrects = _compute_joint_acc(pred_heads, all_labels, true_lengths, config.num_heads)
         joint_acc = joint_corrects / len(self.val_set)
 
-        print(f'TTA Char Acc: {char_acc * 100:.2f}%  |  Joint Acc: {joint_acc * 100:.2f}%')
+        print(f'TTA Char Acc: {char_acc * 100:.2f}%  |  Digit Acc: {digit_acc * 100:.2f}%  |  Joint Acc: {joint_acc * 100:.2f}%')
         self.model.train()
         return joint_acc
