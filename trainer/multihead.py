@@ -589,7 +589,7 @@ class MultiHeadTrainer(BaseTrainer):
                 dynamic_attn_weight = config.attn_supervision_weight * min(1.0, epoch_ratio * 1.5)
                 
                 ord_loss_clamped = ord_loss.clamp(max=5.0) if isinstance(ord_loss, t.Tensor) else ord_loss
-                attn_sup_loss = attn_sup_loss.clamp(max=3.0) if isinstance(attn_sup_loss, t.Tensor) else attn_sup_loss
+                attn_sup_loss = attn_sup_loss.clamp(max=8.0) if isinstance(attn_sup_loss, t.Tensor) else attn_sup_loss
                 
                 loss = (config.cls_loss_weight * cls_loss + config.bbox_loss_weight * bbox_loss
                         + config.attn_diversity_weight * div_loss
