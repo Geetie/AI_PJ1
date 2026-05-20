@@ -26,9 +26,9 @@ def find_latest_checkpoint(checkpoint_dir):
     checkpoint_files = glob(os.path.join(checkpoint_dir, '*.pth'))
     if not checkpoint_files:
         return None
-    best_files = [f for f in checkpoint_files if os.path.basename(f).startswith('best-')]
-    if best_files:
-        return max(best_files, key=lambda x: os.path.getmtime(x))
+    epoch_files = [f for f in checkpoint_files if os.path.basename(f).startswith('epoch-')]
+    if epoch_files:
+        return max(epoch_files, key=lambda x: os.path.getmtime(x))
     return max(checkpoint_files, key=lambda x: os.path.getmtime(x))
 
 

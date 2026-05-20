@@ -273,7 +273,7 @@ class TrainingLogger:
         self.logger.info(msg)
 
     def log_epoch_end(self, epoch, train_acc, val_acc, lr, is_best=False, patience_counter=0,
-                      char_acc=None, digit_acc=None):
+                      char_acc=None, digit_acc=None, raw_joint_acc=None):
         epoch_time = time.time() - self.epoch_start_time
         mins, secs = divmod(int(epoch_time), 60)
         msg = f'[EPOCH] Epoch={epoch + 1}/{config.epoches} ' \
@@ -282,6 +282,8 @@ class TrainingLogger:
             msg += f' val_char={char_acc:.2f}%'
         if digit_acc is not None:
             msg += f' val_digit={digit_acc:.2f}%'
+        if raw_joint_acc is not None:
+            msg += f' raw_joint={raw_joint_acc:.2f}%'
         msg += f' lr={lr:.8f} epoch_time={mins}m{secs:02d}s'
         if t.cuda.is_available():
             msg += f' gpu_peak={self.gpu_peak_mem:.1f}GB'
@@ -668,6 +670,7 @@ class BaseTrainer:
                 train_char = getattr(self, '_last_train_char_acc', None)
                 train_digit = getattr(self, '_last_train_digit_acc', None)
                 val_digit = getattr(self, '_last_val_digit_acc', None)
+                val_raw_joint = getattr(self, '_last_val_raw_joint_acc', None)
                 self.train_log.append({
                     'epoch': epoch + 1,
                     'train_joint_acc': train_joint,
@@ -676,13 +679,15 @@ class BaseTrainer:
                     'val_joint_acc': acc * 100,
                     'val_char_acc': char_acc_val * 100 if char_acc_val is not None else None,
                     'val_digit_acc': val_digit * 100 if val_digit is not None else None,
+                    'val_raw_joint_acc': val_raw_joint * 100 if val_raw_joint is not None else None,
                     'lr': current_lr
                 })
                 self._check_early_stopping(acc, epoch)
                 self.logger.log_epoch_end(epoch, train_acc, acc * 100, current_lr, is_best,
                                           self.patience_counter,
                                           char_acc=char_acc_val * 100 if char_acc_val is not None else None,
-                                          digit_acc=val_digit * 100 if val_digit is not None else None)
+                                          digit_acc=val_digit * 100 if val_digit is not None else None,
+                                          raw_joint_acc=val_raw_joint * 100 if val_raw_joint is not None else None)
                 os.makedirs(config.checkpoints, exist_ok=True)
 
                 if is_best:
