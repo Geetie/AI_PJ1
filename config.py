@@ -69,12 +69,12 @@ COMPILE_AVAILABLE = COMPILE_AVAILABLE
 class Config:
     """所有超参数配置"""
     # =========================================================
-    # ⚠️ 显存限制：batch_size 固定为 64，禁止修改！
-    # 22GB GPU + AMP 训练 FPN MultiHead 模型，batch_size=128 会 OOM
-    # batch_size=64 + grad_accum_steps=4 → effective batch=256
+    # ⚠️ 显存限制：batch_size 固定为 32，禁止修改！
+    # 24GB GPU + AMP 训练 FPN MultiHead 模型，batch_size=64 仍会 OOM
+    # batch_size=32 + grad_accum_steps=8 → effective batch=256
     # =========================================================
-    batch_size = 64
-    eval_batch_size = 96
+    batch_size = 32
+    eval_batch_size = 32
     lr = 2e-3
     backbone_lr_factor = 0.1
     momentum = 0.9
@@ -85,8 +85,8 @@ class Config:
     scheduler_type = 'warm_restarts'
     
     # 梯度累积与裁剪
-    # batch_size=64 → effective batch = 64 * 4 = 256，与 batch=128 时一致
-    grad_accum_steps = 4
+    # batch_size=32 → effective batch = 32 * 8 = 256，与 batch=128 时一致
+    grad_accum_steps = 8
     grad_clip_max_norm = 5.0
     
     # Loss权重
