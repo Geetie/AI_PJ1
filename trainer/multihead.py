@@ -72,6 +72,7 @@ class MultiHeadTrainer(BaseTrainer):
         self.model = create_model(self._model_type).to(self.device)
 
         self._loaded_from_checkpoint = False
+        self._optimizer_state_lost = False
 
         if config.pretrained is not None:
             ckpt = t.load(config.pretrained, map_location=self.device, weights_only=False)
@@ -202,11 +203,8 @@ class MultiHeadTrainer(BaseTrainer):
                     config.start_epoch = ckpt['epoch']
                     self._current_epoch = ckpt['epoch']
                 if 'opt' in ckpt:
-                    try:
-                        self.optimizer.load_state_dict(ckpt['opt'])
-                        self.logger.logger.info('Restored optimizer state from checkpoint')
-                    except Exception as e:
-                        self.logger.logger.warning(f'Failed to restore optimizer: {e}. Using new optimizer.')
+                    if not self._restore_optimizer_robust(ckpt):
+                        self._optimizer_state_lost = True
                 if 'lr_scheduler' in ckpt:
                     try:
                         self.lr_scheduler.load_state_dict(ckpt['lr_scheduler'])
@@ -226,6 +224,16 @@ class MultiHeadTrainer(BaseTrainer):
                 self.logger.logger.info(f'Restored best_acc: {self.best_acc * 100:.2f}%, '
                                        f'start_epoch: {config.start_epoch}, '
                                        f'patience: {self.patience_counter}/{config.early_stopping_patience}')
+
+        if self._optimizer_state_lost:
+            self._post_reset_warmup_epochs = 3
+            self._warmup_target_lrs = [pg['lr'] for pg in self.optimizer.param_groups]
+            self._warmup_start_lrs = [pg['lr'] * 0.1 for pg in self.optimizer.param_groups]
+            for pg in self.optimizer.param_groups:
+                pg['lr'] = pg['lr'] * 0.1
+            self.logger.logger.info(
+                f'[CKPT] Optimizer state lost, scheduling {self._post_reset_warmup_epochs}-epoch warmup '
+                f'from LR={self.optimizer.param_groups[0]["lr"]:.8f}')
 
         self._gpu_warmup()
 
@@ -573,6 +581,7 @@ class MultiHeadTrainer(BaseTrainer):
                 dynamic_attn_weight = config.attn_supervision_weight * min(1.0, epoch_ratio * 1.5)
                 
                 ord_loss_clamped = ord_loss.clamp(max=5.0) if isinstance(ord_loss, t.Tensor) else ord_loss
+                attn_sup_loss = attn_sup_loss.clamp(max=3.0) if isinstance(attn_sup_loss, t.Tensor) else attn_sup_loss
                 
                 loss = (config.cls_loss_weight * cls_loss + config.bbox_loss_weight * bbox_loss
                         + config.attn_diversity_weight * div_loss
@@ -646,6 +655,7 @@ class MultiHeadTrainer(BaseTrainer):
 
         self._last_train_joint_acc = joint_corrects * 100 / max(joint_total, 1)
         self._last_train_char_acc = char_corrects * 100 / max(total_chars, 1)
+        self._last_epoch_avg_loss = total_loss / max(len(self.train_loader), 1)
         if scaler_skipped:
             self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: scaler.step() skipped at least once '
                                        f'(inf/nan gradients), model may not be learning')

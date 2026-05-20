@@ -71,9 +71,83 @@ def _convert_p1_channels(state_dict, model_sd):
     return converted, converted_keys
 
 
+def _convert_head_interaction(state_dict, model_sd):
+    hi_prefix = 'head_interaction.encoder.layers.'
+    ckpt_layer_indices = set()
+    for k in state_dict:
+        if k.startswith(hi_prefix):
+            parts = k[len(hi_prefix):].split('.')
+            if parts[0].isdigit():
+                ckpt_layer_indices.add(int(parts[0]))
+    model_layer_indices = set()
+    for k in model_sd:
+        if k.startswith(hi_prefix):
+            parts = k[len(hi_prefix):].split('.')
+            if parts[0].isdigit():
+                model_layer_indices.add(int(parts[0]))
+    if not ckpt_layer_indices or not model_layer_indices:
+        return state_dict, []
+    ckpt_ffn_dim = None
+    model_ffn_dim = None
+    for k, v in state_dict.items():
+        if k.startswith(hi_prefix) and 'linear1.weight' in k:
+            ckpt_ffn_dim = v.shape[0]
+            break
+    for k, v in model_sd.items():
+        if k.startswith(hi_prefix) and 'linear1.weight' in k:
+            model_ffn_dim = v.shape[0]
+            break
+    ffn_changed = (ckpt_ffn_dim is not None and model_ffn_dim is not None
+                   and ckpt_ffn_dim != model_ffn_dim)
+    layers_changed = (ckpt_layer_indices != model_layer_indices)
+    if not ffn_changed and not layers_changed:
+        return state_dict, []
+    converted = {}
+    converted_keys = []
+    ffn_subkeys = {'linear1.weight', 'linear1.bias', 'linear2.weight'}
+    for k, v in state_dict.items():
+        if not k.startswith(hi_prefix):
+            converted[k] = v
+            continue
+        parts = k[len(hi_prefix):].split('.')
+        layer_idx = int(parts[0])
+        sub_key = '.'.join(parts[1:])
+        if layer_idx not in model_layer_indices:
+            continue
+        if ffn_changed and sub_key in ffn_subkeys:
+            target_shape = model_sd[k].shape
+            if sub_key == 'linear1.weight':
+                new_v = t.zeros(*target_shape)
+                copy_rows = min(v.shape[0], target_shape[0])
+                new_v[:copy_rows] = v[:copy_rows]
+                if target_shape[0] > copy_rows:
+                    new_v[copy_rows:] = t.randn(target_shape[0] - copy_rows, *target_shape[1:]) * 0.02
+                converted[k] = new_v
+                converted_keys.append(k)
+            elif sub_key == 'linear1.bias':
+                new_v = t.zeros(*target_shape)
+                copy_size = min(v.shape[0], target_shape[0])
+                new_v[:copy_size] = v[:copy_size]
+                converted[k] = new_v
+                converted_keys.append(k)
+            elif sub_key == 'linear2.weight':
+                new_v = t.zeros(*target_shape)
+                copy_cols = min(v.shape[1], target_shape[1])
+                new_v[:, :copy_cols] = v[:, :copy_cols]
+                if target_shape[1] > copy_cols:
+                    new_v[:, copy_cols:] = t.randn(target_shape[0], target_shape[1] - copy_cols) * 0.02
+                converted[k] = new_v
+                converted_keys.append(k)
+        else:
+            converted[k] = v
+    return converted, converted_keys
+
+
 def _load_state_dict_compat(model, state_dict, strict=False):
     model_sd = model.state_dict()
-    converted, converted_keys = _convert_p1_channels(state_dict, model_sd)
+    converted, p1_keys = _convert_p1_channels(state_dict, model_sd)
+    converted, hi_keys = _convert_head_interaction(converted, model_sd)
+    converted_keys = p1_keys + hi_keys
     filtered = {}
     skipped_keys = []
     for k, v in converted.items():
@@ -89,8 +163,8 @@ def _load_state_dict_compat(model, state_dict, strict=False):
         import logging as _logging
         _logger = _logging.getLogger('checkpoint_compat')
         _logger.info(
-            f'[CKPT-COMPAT] Converted {len(converted_keys)} P1-channel keys '
-            f'(old→new channel slicing)')
+            f'[CKPT-COMPAT] Converted {len(converted_keys)} keys '
+            f'(P1-channel: {len(p1_keys)}, HeadInteraction: {len(hi_keys)})')
     if skipped_keys:
         import logging as _logging
         _logger = _logging.getLogger('checkpoint_compat')
@@ -272,6 +346,7 @@ class BaseTrainer:
         self.logger = TrainingLogger()
         self._oom_retry_count = 0
         self._original_batch_size = config.batch_size
+        self._original_effective_batch_size = config.batch_size * config.grad_accum_steps
         self._stable_batch_size = None
         self._stable_epoch_count = 0
         self._min_stable_epochs_for_recovery = 3
@@ -446,6 +521,21 @@ class BaseTrainer:
             if epoch > 0:
                 self.lr_scheduler.step()
 
+            if hasattr(self, '_post_reset_warmup_epochs') and self._post_reset_warmup_epochs > 0:
+                total_warmup = 3
+                progress = 1.0 - (self._post_reset_warmup_epochs / total_warmup)
+                for pg, start_lr, target_lr in zip(
+                        self.optimizer.param_groups,
+                        self._warmup_start_lrs, self._warmup_target_lrs):
+                    pg['lr'] = start_lr + (target_lr - start_lr) * progress
+                self._post_reset_warmup_epochs -= 1
+                self.logger.logger.info(
+                    f'[WARMUP-RESET] progress={progress:.2f} LR={self.optimizer.param_groups[0]["lr"]:.8f}')
+                if self._post_reset_warmup_epochs == 0:
+                    del self._post_reset_warmup_epochs
+                    del self._warmup_start_lrs
+                    del self._warmup_target_lrs
+
             self._pre_epoch_hook(epoch)
 
             current_lr = self.optimizer.param_groups[0]['lr']
@@ -478,13 +568,19 @@ class BaseTrainer:
                         config.batch_size = max(int(config.batch_size * safe_ratio), 16)
                     else:
                         config.batch_size = max(int(config.batch_size * 0.75), 16)
-                    config.grad_accum_steps = max(-(-self._original_batch_size // config.batch_size), 1)
+                    config.grad_accum_steps = max(-(-self._original_effective_batch_size // config.batch_size), 1)
                     self._stable_batch_size = None
                     self.logger.logger.warning(
                         f'[OOM] Reducing batch_size {old_bs} -> {config.batch_size}, '
                         f'peak={peak_gb:.1f}GB/{total_gb:.1f}GB, '
                         f'headroom={headroom:.1f}GB, '
                         f'grad_accum_steps={config.grad_accum_steps} (retry {self._oom_retry_count})')
+                    lr_scale = config.batch_size / old_bs
+                    for pg in self.optimizer.param_groups:
+                        old_lr = pg['lr']
+                        pg['lr'] = pg['lr'] * lr_scale
+                        self.logger.logger.info(
+                            f'[OOM] Adjusted LR: {old_lr:.8f} -> {pg["lr"]:.8f} (scale={lr_scale:.3f})')
                     t.cuda.reset_peak_memory_stats()
                     self._cleanup_dataloader(self.train_loader)
                     self._rebuild_dataloaders()
@@ -501,6 +597,16 @@ class BaseTrainer:
                 else:
                     raise
             self._oom_retry_count = 0
+
+            if hasattr(self, '_last_epoch_avg_loss') and hasattr(self, '_prev_epoch_avg_loss'):
+                if self._last_epoch_avg_loss > self._prev_epoch_avg_loss * 3.0 and self._prev_epoch_avg_loss > 0:
+                    for pg in self.optimizer.param_groups:
+                        pg['lr'] = pg['lr'] * 0.5
+                    self.logger.logger.warning(
+                        f'[LOSS-SPIKE] Loss jumped from {self._prev_epoch_avg_loss:.4f} to '
+                        f'{self._last_epoch_avg_loss:.4f}, halving LR to {self.optimizer.param_groups[0]["lr"]:.8f}')
+            if hasattr(self, '_last_epoch_avg_loss'):
+                self._prev_epoch_avg_loss = self._last_epoch_avg_loss
             self._stable_epoch_count += 1
             if self._stable_batch_size is None:
                 self._stable_batch_size = config.batch_size
@@ -523,7 +629,7 @@ class BaseTrainer:
                     new_bs = min(config.batch_size + recovery_step, self._stable_batch_size)
                     if new_bs != config.batch_size:
                         config.batch_size = new_bs
-                        config.grad_accum_steps = max(self._original_batch_size // config.batch_size, 1)
+                        config.grad_accum_steps = max(-(-self._original_effective_batch_size // config.batch_size), 1)
                         self._stable_epoch_count = 0
                         self.logger.logger.info(
                             f'[RECOVER] Increasing batch_size to {config.batch_size} '
@@ -577,7 +683,7 @@ class BaseTrainer:
                 if (epoch + 1) % config.checkpoint_interval == 0 or self._pending_save:
                     periodic_path = os.path.join(config.checkpoints,
                                                  'epoch-%s-%d-acc-%.2f.pth' % (self._checkpoint_prefix, epoch + 1, acc * 100))
-                    self.save_model(periodic_path, save_opt=False)
+                    self.save_model(periodic_path, save_opt=True)  # 保存完整训练状态，方便续训
                     self.logger.log_save(periodic_path, save_type='periodic')
                     self._periodic_checkpoints.append(periodic_path)
                     self._cleanup_old_checkpoints()
@@ -600,7 +706,19 @@ class BaseTrainer:
         dicts['optimizer_type'] = config.optimizer_type
         dicts['scheduler_type'] = config.scheduler_type
         if save_opt:
-            dicts['opt'] = self.optimizer.state_dict()
+            opt_state = self.optimizer.state_dict()
+            param_name_groups = []
+            param_idx = 0
+            all_named_params = list(raw_model.named_parameters())
+            for pg in self.optimizer.param_groups:
+                names = []
+                for _ in pg['params']:
+                    if param_idx < len(all_named_params):
+                        names.append(all_named_params[param_idx][0])
+                    param_idx += 1
+                param_name_groups.append(names)
+            opt_state['param_name_groups'] = param_name_groups
+            dicts['opt'] = opt_state
             dicts['lr_scheduler'] = self.lr_scheduler.state_dict()
             dicts['scaler'] = self.scaler.state_dict()
         if save_config:
@@ -611,24 +729,88 @@ class BaseTrainer:
     def _get_raw_model(self):
         return _get_raw_model_external(self.model)
 
+    def _restore_optimizer_robust(self, ckpt):
+        if not isinstance(ckpt, dict) or 'opt' not in ckpt:
+            return False
+        ckpt_opt_state = ckpt['opt']
+        if not isinstance(ckpt_opt_state, dict) or 'state' not in ckpt_opt_state:
+            return False
+
+        try:
+            self.optimizer.load_state_dict(ckpt_opt_state)
+            self.logger.logger.info('Restored optimizer state from checkpoint')
+            return True
+        except Exception as e:
+            self.logger.logger.warning(
+                f'Direct optimizer restore failed: {e}. Attempting parameter-level matching...')
+
+        ckpt_state = ckpt_opt_state.get('state', {})
+        ckpt_param_groups = ckpt_opt_state.get('param_groups', [])
+        ckpt_param_name_groups = ckpt_opt_state.get('param_name_groups', None)
+
+        if ckpt_param_name_groups is None:
+            self.logger.logger.warning(
+                'Checkpoint optimizer has no param_name_groups, cannot do parameter-level matching. '
+                'Using new optimizer.')
+            return False
+
+        ckpt_name_to_state_idx = {}
+        global_idx = 0
+        for gi, name_list in enumerate(ckpt_param_name_groups):
+            for name in name_list:
+                ckpt_name_to_state_idx[name] = global_idx
+                global_idx += 1
+
+        raw_model = self._get_raw_model()
+        all_named_params = list(raw_model.named_parameters())
+
+        current_param_idx = 0
+        restored = 0
+        for pg in self.optimizer.param_groups:
+            for param in pg['params']:
+                if current_param_idx < len(all_named_params):
+                    name = all_named_params[current_param_idx][0]
+                    if name in ckpt_name_to_state_idx:
+                        ckpt_idx = ckpt_name_to_state_idx[name]
+                        if ckpt_idx in ckpt_state:
+                            try:
+                                self.optimizer.state[param].update(ckpt_state[ckpt_idx])
+                                restored += 1
+                            except Exception:
+                                pass
+                current_param_idx += 1
+
+        if restored > 0:
+            self.logger.logger.info(
+                f'Partially restored optimizer state: {restored}/{len(all_named_params)} params')
+            return True
+        else:
+            self.logger.logger.warning('Failed to restore any optimizer state. Using new optimizer.')
+            return False
+
     def load_model(self, load_path, skip_load_weights=False, save_opt=False, save_config=False):
         dicts = t.load(load_path, map_location=self.device, weights_only=False)
         raw_model = self._get_raw_model()
         if not skip_load_weights:
-            incompatible = raw_model.load_state_dict(dicts['model'], strict=False)
-            if incompatible.missing_keys or incompatible.unexpected_keys:
+            incompatible, skipped = _load_state_dict_compat(raw_model, dicts['model'])
+            if skipped:
+                self.logger.logger.warning(
+                    f'[LOAD] Skipped {len(skipped)} shape-mismatched keys during load')
+            missing = incompatible.missing_keys
+            unexpected = incompatible.unexpected_keys
+            if missing or unexpected:
                 self.logger.logger.warning(
                     f'[LOAD] Incompatible keys detected. '
-                    f'Missing: {len(incompatible.missing_keys)}, '
-                    f'Unexpected: {len(incompatible.unexpected_keys)}')
-                if incompatible.missing_keys:
+                    f'Missing: {len(missing)}, '
+                    f'Unexpected: {len(unexpected)}')
+                if missing:
                     self.logger.logger.warning(
                         f'[LOAD] Missing keys (randomly initialized): '
-                        f'{incompatible.missing_keys[:5]}...'
-                        if len(incompatible.missing_keys) > 5
-                        else f'[LOAD] Missing keys: {incompatible.missing_keys}')
+                        f'{missing[:5]}...'
+                        if len(missing) > 5
+                        else f'[LOAD] Missing keys: {missing}')
             if self.ema is not None:
-                self.ema.ema.load_state_dict(dicts['model'], strict=False)
+                _load_state_dict_compat(self.ema.ema, dicts['model'])
         if 'epoch' in dicts:
             config.start_epoch = dicts['epoch']
             self._current_epoch = dicts['epoch']

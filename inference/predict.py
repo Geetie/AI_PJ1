@@ -9,6 +9,7 @@ from data.dataset import DigitsDataset, CTCDataset, ctc_test_collate_fn
 from models import create_model
 from models.ctc import CTCModel
 from inference.decode import parse2class, parse2class_from_probs, ctc_beam_decode
+from trainer.base import _load_state_dict_compat
 from utils.misc import write2csv
 from utils.compile_utils import (
     try_compile_model, is_compile_available, CompileLogger, configure_compile_cache
@@ -68,7 +69,7 @@ def predicts(model_path, csv_path, use_tta=True, model_type=None, use_compile=Fa
     mt = model_type or config.model_type
     res_net = create_model(mt).to(device)
     ckpt = t.load(model_path, map_location=device, weights_only=False)
-    res_net.load_state_dict(ckpt['model'])
+    _load_state_dict_compat(res_net, ckpt['model'])
     if 'model_type' in ckpt:
         mt = ckpt['model_type']
     print('Load model from %s successfully' % model_path)
@@ -127,7 +128,7 @@ def ensemble_predict(model_paths, csv_path, model_type=None, use_compile=False):
     for mp in model_paths:
         m = create_model(mt).to(device)
         ckpt = t.load(mp, map_location=device, weights_only=False)
-        m.load_state_dict(ckpt['model'])
+        _load_state_dict_compat(m, ckpt['model'])
         m.eval()
         if use_compile:
             warmup_shapes = [(min(config.eval_batch_size, 16), s, s) for s in config.tta_sizes]
@@ -200,7 +201,8 @@ def cross_model_ensemble(multihead_path, ctc_path, csv_path, model_type=None):
     device = t.device('cuda') if t.cuda.is_available() else t.device('cpu')
     mt = model_type or config.model_type
     mh_model = create_model(mt).to(device)
-    mh_model.load_state_dict(t.load(multihead_path, map_location=device, weights_only=False)['model'])
+    mh_ckpt = t.load(multihead_path, map_location=device, weights_only=False)
+    _load_state_dict_compat(mh_model, mh_ckpt['model'])
     mh_model.eval()
     print(f'Loaded multihead model: {multihead_path}')
 

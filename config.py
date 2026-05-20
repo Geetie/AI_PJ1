@@ -99,7 +99,7 @@ class Config:
     
     # 训练流程控制
     eval_interval = 1
-    checkpoint_interval = 5
+    checkpoint_interval = 3
     print_interval = 50
     checkpoints = os.path.join(SCRIPT_DIR, 'checkpoints')
     pretrained = None
@@ -161,7 +161,7 @@ class Config:
     roi_refine = True
     roi_feat_dim = 256
     roi_teacher_forcing = True
-    head_interaction_layers = 2
+    head_interaction_layers = 4
     roi_gt_prob = 0.8
     num_attn_channels = 8
     soft_attn_temperature = 0.1

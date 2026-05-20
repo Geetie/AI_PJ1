@@ -110,7 +110,7 @@ class HeadInteractionLayer(nn.Module):
         self.learnable_pos = nn.Parameter(t.randn(1, num_heads, feat_dim) * 0.02)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=feat_dim, nhead=nhead,
-            dim_feedforward=feat_dim * 2, dropout=dropout,
+            dim_feedforward=feat_dim * 4, dropout=dropout,
             batch_first=True, norm_first=True
         )
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
