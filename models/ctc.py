@@ -10,12 +10,12 @@ class CTCModel(nn.Module):
         super(CTCModel, self).__init__()
         self.backbone = FPNBackbone()
         self.height_pool = nn.AdaptiveAvgPool2d((1, None))
-        self.lstm = nn.LSTM(config.multiscale_feat_dim, 256, num_layers=2, bidirectional=True, dropout=0.2)
+        self.lstm = nn.LSTM(config.multiscale_feat_dim, 256, num_layers=2, bidirectional=True, dropout=config.dropout)
         self.fc = nn.Sequential(
             nn.Linear(512, 256),
             nn.LayerNorm(256),
             nn.ReLU(inplace=True),
-            nn.Dropout(0.1),
+            nn.Dropout(config.dropout),
             nn.Linear(256, num_classes)
         )
 

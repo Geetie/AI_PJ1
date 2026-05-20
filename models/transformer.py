@@ -26,7 +26,7 @@ class TransformerDigitsModel(nn.Module):
         feat_dim = config.multiscale_feat_dim
         
         self.query_embed = nn.Parameter(t.randn(num_heads, feat_dim) * 0.02)
-        self.pos_2d = nn.Parameter(t.randn(1, feat_dim, 20, 20) * 0.02)
+        self.pos_2d = nn.Parameter(t.randn(1, feat_dim, config.feat_spatial_size, config.feat_spatial_size) * 0.02)
         
         decoder_layer = nn.TransformerDecoderLayer(
             d_model=feat_dim, nhead=config.transformer_heads,

@@ -108,11 +108,7 @@ class MultiHeadTrainer(BaseTrainer):
                     ckpt_sched_type = ckpt['scheduler_type']
                     if ckpt_sched_type != config.scheduler_type:
                         self.logger.logger.info(f'[CKPT] Checkpoint scheduler_type={ckpt_sched_type} '
-                                               f'overrides config scheduler_type={config.scheduler_type}')
-                        config.scheduler_type = ckpt_sched_type
-                elif config.optimizer_type == 'sgd' and config.scheduler_type != 'warmup_cosine':
-                    config.scheduler_type = 'warmup_cosine'
-                    self.logger.logger.info('[CKPT] SGD checkpoint detected, forcing scheduler_type=warmup_cosine')
+                                               f'but keeping config scheduler_type={config.scheduler_type}')
             self.logger.logger.info(f'Load model from {config.pretrained}')
 
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
@@ -389,9 +385,10 @@ class MultiHeadTrainer(BaseTrainer):
         total = class_counts.sum()
         class_weights = total / (class_counts * config.class_num + 1e-6)
         class_weights = class_weights / class_weights.mean()
+        class_weights[10] = max(class_weights[10].item(), 0.5)
         class_weights = class_weights.to(self.device)
         self.logger.logger.info(f'Computed class weights from JSON: {class_weights.cpu().numpy()}')
-        self.logger.logger.info(f'   Class 10 (empty) weight: {class_weights[10].item():.4f}')
+        self.logger.logger.info(f'   Class 10 (empty) weight: {class_weights[10].item():.4f} (floored at 0.5)')
         return class_weights
 
     @staticmethod
@@ -540,9 +537,9 @@ class MultiHeadTrainer(BaseTrainer):
                     cls_loss = cls_loss + head_loss.mean()
 
                 if use_cutmix:
-                    div_loss = t.tensor(0.0, device=self.device, requires_grad=True)
-                    attn_sup_loss = t.tensor(0.0, device=self.device, requires_grad=True)
-                    ord_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    div_loss = attention_diversity_loss(attn_maps)
+                    attn_sup_loss = self.attn_supervision(attn_maps, bbox_a, mask_a)
+                    ord_loss = spatial_ordering_loss(attn_maps, bbox_preds=pred_bboxes, bbox_mask=mask_a)
                     bbox_loss = t.tensor(0.0, device=self.device, requires_grad=True)
                 else:
                     div_loss = attention_diversity_loss(attn_maps)
@@ -567,9 +564,11 @@ class MultiHeadTrainer(BaseTrainer):
                 dynamic_ordering_weight = config.ordering_loss_weight * min(1.0, epoch_ratio * 2)
                 dynamic_attn_weight = config.attn_supervision_weight * min(1.0, epoch_ratio * 1.5)
                 
+                ord_loss_clamped = ord_loss.clamp(max=5.0) if isinstance(ord_loss, t.Tensor) else ord_loss
+                
                 loss = (config.cls_loss_weight * cls_loss + config.bbox_loss_weight * bbox_loss
                         + config.attn_diversity_weight * div_loss
-                        + dynamic_ordering_weight * ord_loss
+                        + dynamic_ordering_weight * ord_loss_clamped
                         + dynamic_attn_weight * attn_sup_loss)
 
                 aux_loss = t.tensor(0.0, device=self.device, requires_grad=True)
@@ -593,10 +592,7 @@ class MultiHeadTrainer(BaseTrainer):
 
             if (i + 1) % config.grad_accum_steps == 0 or (i + 1) == len(tbar):
                 self.scaler.unscale_(self.optimizer)
-                if hasattr(config, 'grad_clip_max_norm'):
-                    t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=config.grad_clip_max_norm)
-                else:
-                    t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+                t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=config.grad_clip_max_norm)
                 step_result = self.scaler.step(self.optimizer)
                 if step_result is None:
                     scaler_skipped = True
@@ -614,11 +610,14 @@ class MultiHeadTrainer(BaseTrainer):
             batch_time = time.time() - batch_start
             batch_start = time.time()
 
-            joint_total += img.size(0)
-            joint_corrects += _compute_joint_acc(pred, label, true_lengths, config.num_heads)
-            c_corrects, c_total = _compute_char_acc(pred, label, true_lengths, config.num_heads)
-            char_corrects += c_corrects
-            total_chars += c_total
+            if not use_cutmix:
+                joint_total += img.size(0)
+                pred_masked = [p.clone() for p in pred]
+                _apply_length_mask(pred_masked, length_logits, config.num_heads)
+                joint_corrects += _compute_joint_acc(pred_masked, label, true_lengths, config.num_heads)
+                c_corrects, c_total = _compute_char_acc(pred_masked, label, true_lengths, config.num_heads)
+                char_corrects += c_corrects
+                total_chars += c_total
 
             tbar.set_description(
                 'Epoch %d, loss: %.3f, joint: %.3f, char: %.3f' % (
@@ -657,6 +656,8 @@ class MultiHeadTrainer(BaseTrainer):
             total_chars = 0
             joint_corrects = 0
             joint_total = 0
+            length_corrects = 0
+            length_total = 0
             oom_hit = False
             with t.no_grad():
                 tbar = tqdm(self.val_loader)
@@ -675,6 +676,11 @@ class MultiHeadTrainer(BaseTrainer):
 
                         joint_corrects += _compute_joint_acc(pred_cls, label, true_lengths, config.num_heads)
                         joint_total += img.size(0)
+
+                        pred_length = length_logits.argmax(dim=1)
+                        clamped_true = true_lengths.clamp(max=config.num_heads)
+                        length_corrects += (pred_length == clamped_true).sum().item()
+                        length_total += img.size(0)
 
                         tbar.set_description('Val Char: %.2f%% Joint: %.2f%%' % (
                             char_corrects * 100 / max(total_chars, 1),
@@ -704,7 +710,9 @@ class MultiHeadTrainer(BaseTrainer):
         joint_acc = joint_corrects / max(joint_total, 1)
         self._last_val_char_acc = char_acc
         self._last_val_joint_acc = joint_acc
-        print(f'  Char Acc: {char_acc * 100:.2f}%  |  Joint Acc: {joint_acc * 100:.2f}%')
+        length_acc = length_corrects / max(length_total, 1)
+        print(f'  Char Acc: {char_acc * 100:.2f}%  |  Joint Acc: {joint_acc * 100:.2f}%  |  Length Acc: {length_acc * 100:.2f}%')
+        self.logger.logger.info(f'[EVAL] length_acc={length_acc * 100:.2f}% ({length_corrects}/{length_total})')
 
         return joint_acc
 

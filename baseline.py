@@ -28,27 +28,18 @@ try:
 except ImportError:
     roi_align = None
 
+# 统一使用config.py的配置
+from config import config, set_seed, BASE_DIR, SCRIPT_DIR, NUM_WORKERS, data_dir, NUM_HEADS
 
-def set_seed(seed=42):
-    random.seed(seed)
-    np.random.seed(seed)
-    t.manual_seed(seed)
-    t.cuda.manual_seed_all(seed)
-    t.backends.cudnn.benchmark = False
-    t.backends.cudnn.deterministic = True
-
-
+# 设置随机种子
 set_seed(42)
 
 if t.cuda.is_available():
     t.set_float32_matmul_precision('high')
     print('✅ TF32 matmul precision enabled')
 
-BASE_DIR = '/mnt/workspace' if os.path.exists('/mnt/workspace') else os.path.dirname(os.path.abspath(__file__))
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# 设置torch hub目录
 t.hub.set_dir(os.path.join(SCRIPT_DIR, 'torch_hub'))
-
-NUM_WORKERS = min(multiprocessing.cpu_count() - 1, 8) if os.name != 'nt' else 0
 
 
 class PadToSquare:
@@ -64,78 +55,10 @@ class PadToSquare:
         return transforms.functional.pad(img, padding, fill=self.fill)
 
 
-CSV_PATH = os.path.join(BASE_DIR, 'mchar_data_list_0515.csv')
-dataset_path = os.path.join(BASE_DIR, 'dataset')
+# 从config.py导入data_dir等配置
+from config import data_dir
 
-print(f'数据集目录：{dataset_path}')
-if not os.path.exists(dataset_path):
-    os.mkdir(dataset_path)
-
-links = pd.read_csv(CSV_PATH)
-for i, link in enumerate(links['link']):
-    file_name = links['file'][i]
-    file_size_str = links['size'][i] if 'size' in links.columns else '?'
-    print(f'Downloading {file_name} ({file_size_str})...')
-    file_name = os.path.join(dataset_path, file_name)
-    need_download = True
-    if os.path.exists(file_name):
-        expected_mb = float(file_size_str.replace('MB', '')) * 1024 * 1024 if isinstance(file_size_str, str) and 'MB' in file_size_str else 0
-        actual_mb = os.path.getsize(file_name)
-        if expected_mb > 0 and abs(actual_mb - expected_mb) / expected_mb > 0.01:
-            print(f'  File incomplete ({actual_mb / 1024 / 1024:.1f}MB / {expected_mb / 1024 / 1024:.1f}MB), re-downloading...')
-            os.remove(file_name)
-        else:
-            print(f'  Already exists, skipping.')
-            need_download = False
-    if need_download:
-        if shutil.which('wget'):
-            os.system(f'wget -q --show-progress -O "{file_name}" "{link}"')
-        elif shutil.which('curl'):
-            os.system(f'curl -L -# -o "{file_name}" "{link}"')
-        else:
-            response = requests.get(link, stream=True)
-            total = int(response.headers.get('content-length', 0))
-            with open(file_name, 'wb') as f:
-                for chunk in tqdm(response.iter_content(chunk_size=10485760),
-                                  total=total // 10485760 + 1, desc=file_name, unit='MB'):
-                    if chunk:
-                        f.write(chunk)
-
-zip_list = ['mchar_train', 'mchar_test_a', 'mchar_val']
-for little_zip in zip_list:
-    zip_name = os.path.join(dataset_path, little_zip)
-    zip_path = os.path.join(dataset_path, f'{little_zip}.zip')
-    need_extract = True
-    if os.path.exists(zip_name) and os.path.isdir(zip_name):
-        file_count = len(os.listdir(zip_name))
-        if file_count > 100:
-            print(f'{little_zip}/ already extracted ({file_count} files), skipping.')
-            need_extract = False
-    if need_extract:
-        if os.path.exists(zip_name):
-            print(f'{little_zip}/ incomplete, removing and re-extracting...')
-            shutil.rmtree(zip_name)
-        print(f'Extracting {little_zip}.zip...')
-        if shutil.which('unzip'):
-            ret = os.system(f'unzip -o "{zip_path}" -d "{dataset_path}"')
-            if ret != 0:
-                print(f'  unzip failed (exit code {ret}), trying Python zipfile...')
-                with zipfile.ZipFile(zip_path, 'r') as zf:
-                    zf.extractall(path=dataset_path)
-        else:
-            with zipfile.ZipFile(zip_path, 'r') as zf:
-                zf.extractall(path=dataset_path)
-        print(f'{little_zip} extraction done.')
-
-data_dir = {
-    'train_data': f'{dataset_path}/mchar_train/',
-    'val_data': f'{dataset_path}/mchar_val/',
-    'test_data': f'{dataset_path}/mchar_test_a/',
-    'train_label': f'{dataset_path}/mchar_train.json',
-    'val_label': f'{dataset_path}/mchar_val.json',
-    'submit_file': f'{dataset_path}/mchar_sample_submit_A.csv'
-}
-
+# 打印数据集信息
 train_list = glob(data_dir['train_data'] + '*.png')
 test_list = glob(data_dir['test_data'] + '*.png')
 val_list = glob(data_dir['val_data'] + '*.png')
@@ -250,64 +173,7 @@ def label_summary():
         print('%d个数字的图片数目: %d' % (k, v))
 
 
-NUM_HEADS = 6  # 最大支持6个字符，但通过动态掩码处理可变长度
-
-
-class Config:
-    batch_size = 128
-    lr = 2e-3
-    backbone_lr_factor = 0.1
-    momentum = 0.9
-    weights_decay = 5e-4
-    class_num = 11
-    eval_interval = 1
-    checkpoint_interval = 5
-    print_interval = 50
-    checkpoints = os.path.join(SCRIPT_DIR, 'checkpoints')
-    pretrained = None
-    start_epoch = 0
-    epoches = 120
-    warmup_epochs = 5
-    smooth = 0.1
-    erase_prob = 0.2
-    num_heads = NUM_HEADS
-    input_height = 384
-    input_width = 384
-    resize_size = 416
-    tta_sizes = [288, 320, 352, 384, 416]
-    dropout = 0.2
-    fc_hidden = 1024
-    ema_decay = 0.999
-    mixup_alpha = 0.0  # 禁用Mixup（改用CutMix）
-    mixup_prob = 0.0   # 禁用Mixup
-    cutmix_alpha = 1.0  # 启用CutMix
-    cutmix_prob = 0.5   # 50%概率应用CutMix
-    train_eval_interval = 10
-    use_torch_compile = False
-    attn_diversity_weight = 0.1
-    multiscale_feat_dim = 512
-    bbox_loss_weight = 5.0
-    pos_embed_channels = 64
-    feat_spatial_size = 40
-    ordering_loss_weight = 2.0  # 提高ordering loss权重以增强几何一致性
-    roi_refine = True
-    roi_feat_dim = 256
-    roi_teacher_forcing = True
-    transformer_heads = 4
-    transformer_layers = 4
-    model_type = 'fpn_multihead'  # 默认使用最优架构(FPN Multi-Head + ROI精化)
-    keep_aspect_ratio = True
-    attn_supervision_weight = 2.0
-    head_interaction_layers = 2
-    aug_rotation_degrees = 10
-    aug_blur_prob = 0.15
-    roi_gt_prob = 0.8  # 降低初始GT概率，提升模型对预测bbox的鲁棒性
-    num_attn_channels = 8  # 从4增加到8，提升注意力表达能力
-    use_char_level_acc = True  # 使用字符级准确率而非joint accuracy
-    early_stopping_patience = 15  # Early stopping patience (epochs)
-
-
-config = Config()
+# 配置已经从config.py统一导入，无需再定义内部Config类
 
 
 class SEBlock(nn.Module):
@@ -1112,6 +978,8 @@ class LabelSmoothEntropy(nn.Module):
             return loss.mean()
         elif self.size_average == 'sum':
             return loss.sum()
+        elif self.size_average == 'none':
+            return loss
         else:
             raise NotImplementedError
 
@@ -1195,7 +1063,7 @@ class Trainer:
         self.train_set = DigitsDataset(mode='train', aug=True,
                                        input_size=(config.input_height, config.input_width))
         # 使用初始种子创建生成器（对应 epoch 0）
-        self._train_generator = self._make_epoch_generator(self._base_seed)
+        self._train_generator = self._make_epoch_generator(self._base_seed, epoch=0)
         self.train_loader = DataLoader(self.train_set, batch_size=config.batch_size, shuffle=True,
                                        num_workers=NUM_WORKERS, pin_memory=True,
                                        persistent_workers=NUM_WORKERS > 0,
@@ -1224,7 +1092,7 @@ class Trainer:
         
         self.head_criteria = nn.ModuleList()
         for h in range(config.num_heads):
-            self.head_criteria.append(LabelSmoothEntropy(smooth=config.smooth, class_weights=class_weights))
+            self.head_criteria.append(LabelSmoothEntropy(smooth=config.smooth, class_weights=class_weights, size_average='none'))
 
         backbone_params = list(self.model.backbone.parameters())
         other_params = [p for n, p in self.model.named_parameters() if not n.startswith('backbone.')]
@@ -1255,15 +1123,20 @@ class Trainer:
             print('Load model from %s, Eval Acc: %.2f' % (config.pretrained, acc * 100))
             print('Warning: Optimizer and scheduler NOT restored. Using new config.')
     
-    def _make_epoch_generator(self, epoch_seed):
-        """创建指定种子的随机数生成器
+    def _make_epoch_generator(self, base_seed, epoch):
+        """创建指定epoch的随机数生成器
+        
+        确保每个epoch使用唯一的种子，保证数据加载顺序的随机性。
+        种子计算公式: base_seed + epoch * 1000，确保不同epoch的生成器产生不同的随机序列。
         
         Args:
-            epoch_seed: 当前epoch的种子值，与全局种子同步
+            base_seed: 基础种子值
+            epoch: 当前epoch编号
         
         Returns:
             torch.Generator: 配置好种子的随机数生成器
         """
+        epoch_seed = base_seed + epoch * 1000
         generator = t.Generator()
         generator.manual_seed(epoch_seed)
         return generator
@@ -1287,19 +1160,20 @@ class Trainer:
             t.cuda.manual_seed_all(epoch_seed)
         
         if hasattr(self.model, 'set_roi_gt_prob'):
+            import math
             if epoch < config.warmup_epochs:
                 self.model.set_roi_gt_prob(1.0)
             else:
-                decay_end = int(config.epoches * 0.6)
+                decay_end = int(config.epoches * 0.8)
                 if epoch >= decay_end:
                     self.model.set_roi_gt_prob(0.0)
                 else:
                     progress = (epoch - config.warmup_epochs) / max(decay_end - config.warmup_epochs, 1)
-                    self.model.set_roi_gt_prob(1.0 - progress)
+                    self.model.set_roi_gt_prob(0.5 * (1 + math.cos(math.pi * progress)))
         
         self._cleanup_dataloader(self.train_loader)
         # 使用与全局种子同步的生成器种子，确保数据加载顺序在每个epoch都不同
-        self._train_generator = self._make_epoch_generator(epoch_seed)
+        self._train_generator = self._make_epoch_generator(self._base_seed, epoch=epoch)
         self.train_loader = DataLoader(self.train_set, batch_size=config.batch_size, shuffle=True,
                                        num_workers=NUM_WORKERS, pin_memory=True,
                                        persistent_workers=False,
@@ -1423,7 +1297,7 @@ class Trainer:
                 true_lengths = bbox_mask.sum(dim=1).long()  # [B]
                 
                 # 分类损失：只对有效的head计算损失
-                cls_loss = t.tensor(0.0, device=self.device)
+                cls_loss = t.tensor(0.0, device=self.device, requires_grad=True)
                 for h in range(config.num_heads):
                     # 创建mask：只有当该head位置有真实字符时才计算损失
                     valid_mask = (true_lengths > h).float()  # [B], 1 if head h is valid
@@ -1438,37 +1312,41 @@ class Trainer:
                         # 只累加有效样本的损失
                         cls_loss = cls_loss + (head_loss * valid_mask).sum() / valid_mask.sum()
                 
-                div_loss = attention_diversity_loss(attn_maps)
-                # 改进：传入bbox预测和mask以增强几何一致性约束
-                ord_loss = spatial_ordering_loss(attn_maps, bbox_preds=pred_bboxes, bbox_mask=bbox_mask)
-                attn_sup_loss = self.attn_supervision(attn_maps, bbox_target, bbox_mask)
-                bbox_loss = t.tensor(0.0, device=self.device)
-                valid_bbox_sum = (bbox_target * bbox_mask.unsqueeze(-1)).sum(dim=1)
-                valid_bbox_count = bbox_mask.sum(dim=1, keepdim=True).clamp(min=1)
-                mean_bbox = valid_bbox_sum / valid_bbox_count
-                for h in range(config.num_heads):
-                    mask = bbox_mask[:, h]
-                    if mask.sum() > 0:
-                        if use_cutmix:
-                            # CutMix的bbox损失也需要混合
-                            bbox_loss_a = F.smooth_l1_loss(
-                                pred_bboxes[h][mask_a > 0], bbox_a[:, h, :][mask_a > 0])
-                            bbox_loss_b = F.smooth_l1_loss(
-                                pred_bboxes[h][mask_b > 0], bbox_b[:, h, :][mask_b > 0])
-                            bbox_loss_h = lam * bbox_loss_a + (1 - lam) * bbox_loss_b
-                        else:
+                if use_cutmix:
+                    div_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    attn_sup_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    ord_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    bbox_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                else:
+                    div_loss = attention_diversity_loss(attn_maps)
+                    # 改进：传入bbox预测和mask以增强几何一致性约束
+                    ord_loss = spatial_ordering_loss(attn_maps, bbox_preds=pred_bboxes, bbox_mask=bbox_mask)
+                    attn_sup_loss = self.attn_supervision(attn_maps, bbox_target, bbox_mask)
+                    bbox_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    valid_bbox_sum = (bbox_target * bbox_mask.unsqueeze(-1)).sum(dim=1)
+                    valid_bbox_count = bbox_mask.sum(dim=1, keepdim=True).clamp(min=1)
+                    mean_bbox = valid_bbox_sum / valid_bbox_count
+                    for h in range(config.num_heads):
+                        mask = bbox_mask[:, h]
+                        if mask.sum() > 0:
                             bbox_loss_h = F.smooth_l1_loss(
                                 pred_bboxes[h][mask > 0], bbox_target[:, h, :][mask > 0])
-                        bbox_loss = bbox_loss + bbox_loss_h
-                    else:
-                        empty_mask = (mask == 0)
-                        if empty_mask.sum() > 0:
-                            bbox_loss = bbox_loss + F.smooth_l1_loss(
-                                pred_bboxes[h][empty_mask], mean_bbox[empty_mask].detach()) * 0.3
-                loss = (cls_loss + config.bbox_loss_weight * bbox_loss
+                            bbox_loss = bbox_loss + bbox_loss_h
+                        else:
+                            empty_mask = (mask == 0)
+                            if empty_mask.sum() > 0:
+                                bbox_loss = bbox_loss + F.smooth_l1_loss(
+                                    pred_bboxes[h][empty_mask], mean_bbox[empty_mask].detach()) * 0.3
+                
+                # 动态调整loss权重，前期侧重分类，后期增强几何约束
+                epoch_ratio = (epoch + 1) / config.epoches
+                dynamic_ordering_weight = config.ordering_loss_weight * min(1.0, epoch_ratio * 2)
+                dynamic_attn_weight = config.attn_supervision_weight * min(1.0, epoch_ratio * 1.5)
+                
+                loss = (config.cls_loss_weight * cls_loss + config.bbox_loss_weight * bbox_loss
                         + config.attn_diversity_weight * div_loss
-                        + config.ordering_loss_weight * ord_loss
-                        + config.attn_supervision_weight * attn_sup_loss)
+                        + dynamic_ordering_weight * ord_loss
+                        + dynamic_attn_weight * attn_sup_loss)
 
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)

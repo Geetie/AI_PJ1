@@ -5,6 +5,18 @@ import numpy as np
 import torch as t
 import multiprocessing
 
+# 导入平台相关的常量
+from utils.platform import (
+    GPU_PLATFORM, TOTAL_VRAM_GB, NUM_PHYSICAL_CORES,
+    is_nvidia_cuda, is_amd_rocm, COMPILE_AVAILABLE,
+    print_platform_info
+)
+
+# 导出平台相关的常量
+def print_env_info():
+    """打印环境信息的包装函数"""
+    print_platform_info()
+
 # ==================== 随机种子设置 ====================
 def set_seed(seed=42):
     """设置全局随机种子以确保可复现性"""
@@ -47,11 +59,17 @@ data_dir = {
 # ==================== 常量定义 ====================
 NUM_HEADS = 6  # 最大支持6个字符，但通过动态掩码处理可变长度
 
+# 平台相关常量导出
+IS_NVIDIA = is_nvidia_cuda()
+IS_AMD = is_amd_rocm()
+IS_MODELSCOPE = os.path.exists('/mnt/workspace/.modelscope') or 'MODELSCOPE_CLOUD' in os.environ
+COMPILE_AVAILABLE = COMPILE_AVAILABLE
+
 # ==================== 训练配置类 ====================
 class Config:
     """所有超参数配置"""
     # 基础训练参数
-    batch_size = 64
+    batch_size = 128  # 统一为baseline.py的128
     eval_batch_size = 96
     lr = 2e-3
     backbone_lr_factor = 0.1
@@ -59,9 +77,8 @@ class Config:
     weights_decay = 5e-4
     class_num = 11
     
-    # 优化器与调度器
     optimizer_type = 'sgd'
-    scheduler_type = 'warmup_cosine'
+    scheduler_type = 'warm_restarts'
     
     # 梯度累积与裁剪
     grad_accum_steps = 2
@@ -69,11 +86,11 @@ class Config:
     
     # Loss权重
     cls_loss_weight = 1.0
-    aux_loss_weight = 0.3
+    aux_loss_weight = 0.15
     bbox_loss_weight = 5.0
     attn_diversity_weight = 0.1
-    ordering_loss_weight = 1.0
-    attn_supervision_weight = 1.0
+    ordering_loss_weight = 0.05
+    attn_supervision_weight = 0.15
     
     # 训练流程控制
     eval_interval = 1
@@ -93,15 +110,18 @@ class Config:
     prefetch_factor = 2 if NUM_WORKERS > 0 else None
     multiprocessing_context = 'fork' if os.name != 'nt' and NUM_WORKERS > 0 else None
     
-    # 数据增强（降低强度以改善训练不足问题）
+    # 数据增强
     smooth = 0.1
     erase_prob = 0.1
     mixup_alpha = 0.0
     mixup_prob = 0.0
     cutmix_alpha = 1.0
     cutmix_prob = 0.3
-    aug_rotation_degrees = 5
+    aug_rotation_degrees = 10
     aug_blur_prob = 0.1
+    
+    # baseline.py特有参数
+    train_eval_interval = 10
     
     # 输入尺寸
     num_heads = NUM_HEADS
@@ -110,11 +130,16 @@ class Config:
     resize_size = 416
     tta_sizes = [288, 320, 352, 384, 416]
     
+    # 学习率调度
+    warmup_start_factor = 0.1
+    scheduler_T0 = 5
+    scheduler_T_mult = 2
+    scheduler_eta_min = 1e-6
+
     # 模型架构
-    dropout = 0.15
+    dropout = 0.2  # 统一为baseline.py的0.2
     fc_hidden = 1024
     ema_decay = 0.999
-    train_eval_interval = 10
     use_torch_compile = False
     use_gradient_checkpoint = True
     
@@ -133,6 +158,7 @@ class Config:
     head_interaction_layers = 2
     roi_gt_prob = 0.8
     num_attn_channels = 8
+    soft_attn_temperature = 0.1
     
     # Transformer特有参数
     transformer_heads = 4
@@ -147,6 +173,23 @@ class Config:
     # 系统配置
     max_checkpoints = 5
     oom_headroom_ratio = 0.15
+
+
+def make_dataloader(dataset, batch_size, shuffle=False, drop_last=False,
+                    collate_fn=None, num_workers=None):
+    from torch.utils.data import DataLoader
+    nw = num_workers if num_workers is not None else NUM_WORKERS
+    kwargs = dict(
+        batch_size=batch_size, shuffle=shuffle,
+        num_workers=nw, pin_memory=True,
+        drop_last=drop_last,
+    )
+    if nw > 0:
+        kwargs['prefetch_factor'] = 2
+        kwargs['persistent_workers'] = False
+    if collate_fn is not None:
+        kwargs['collate_fn'] = collate_fn
+    return DataLoader(dataset, **kwargs)
 
 
 # 全局配置实例

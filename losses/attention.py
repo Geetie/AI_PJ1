@@ -4,7 +4,6 @@ import torch.nn.functional as F
 
 
 def compute_single_gaussian_kl(attn_single, cx, cy, bw, bh, h, w):
-    """高效计算单张 attention map 与单张高斯 target 的 KL 散度，避免大张量"""
     grid_y = t.arange(h, device=attn_single.device, dtype=t.float32).view(1, h, 1) / h
     grid_x = t.arange(w, device=attn_single.device, dtype=t.float32).view(1, 1, w) / w
     sigma_x = bw / 2.5
@@ -13,7 +12,7 @@ def compute_single_gaussian_kl(attn_single, cx, cy, bw, bh, h, w):
                     (grid_y - cy.view(-1, 1, 1)) ** 2 / (2 * sigma_y.view(-1, 1, 1) ** 2)))
     s = gauss.sum(dim=(1, 2), keepdim=True).clamp(min=1e-8)
     gauss = gauss / s
-    return F.kl_div(attn_single.clamp(min=1e-8).log(), gauss, reduction='batchmean')
+    return F.kl_div(gauss.clamp(min=1e-8).log(), attn_single.clamp(min=1e-8), reduction='batchmean')
 
 
 class AttentionSupervisionLoss(nn.Module):
@@ -65,6 +64,7 @@ def spatial_ordering_loss(attn_maps, bbox_preds=None, bbox_mask=None):
         return t.tensor(0.0, device=attn_maps[0].device if attn_maps is not None and len(attn_maps) > 0 else t.device('cpu'), requires_grad=True)
 
     loss = t.tensor(0.0, device=attn_maps[0].device, requires_grad=True)
+    pair_count = 0
 
     for i in range(len(attn_maps) - 1):
         if bbox_mask is not None:
@@ -82,6 +82,7 @@ def spatial_ordering_loss(attn_maps, bbox_preds=None, bbox_mask=None):
         if bbox_mask is not None:
             violation = violation[mask_both]
         loss = loss + violation.mean()
+        pair_count += 1
 
     if bbox_preds is not None and bbox_mask is not None:
         for i in range(len(bbox_preds) - 1):
@@ -92,5 +93,8 @@ def spatial_ordering_loss(attn_maps, bbox_preds=None, bbox_mask=None):
             if mask_both_valid.sum() > 0:
                 violation = F.relu(cx_i[mask_both_valid] - cx_j[mask_both_valid])
                 loss = loss + violation.mean() * 0.5
+                pair_count += 1
 
+    if pair_count > 0:
+        loss = loss / pair_count
     return loss

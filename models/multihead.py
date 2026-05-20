@@ -18,6 +18,7 @@ class PositionAwareAttentionHead(nn.Module):
         self.pos_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, S, S) * 0.02)
         self.head_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, 1, 1) * 0.02)
         self.num_attn_channels = config.num_attn_channels
+        self.attn_temperature = config.soft_attn_temperature
         self.attention_conv = nn.Sequential(
             nn.Conv2d(in_channels + config.pos_embed_channels * 2, in_channels + config.pos_embed_channels * 2, 3,
                       padding=1, groups=in_channels + config.pos_embed_channels * 2, bias=False),
@@ -62,7 +63,7 @@ class PositionAwareAttentionHead(nn.Module):
             attn_per_ch = F.softmax(attn_raw.view(B, self.num_attn_channels, -1), dim=2)
             attn_per_ch = attn_per_ch.view(B, self.num_attn_channels, H, W)
             peak_conf = attn_per_ch.amax(dim=(2, 3))
-            soft_weights = F.softmax(peak_conf, dim=1)
+            soft_weights = F.softmax(peak_conf / self.attn_temperature, dim=1)
             attn_weights = (soft_weights.unsqueeze(-1).unsqueeze(-1) * attn_per_ch).sum(dim=1, keepdim=True)
         weighted_feat = x * attn_weights
         pooled = self.attn_pool(weighted_feat).flatten(1)
@@ -98,8 +99,10 @@ class CrossHeadCommLayer(nn.Module):
 
 
 class HeadInteractionLayer(nn.Module):
-    def __init__(self, feat_dim, num_heads, num_layers=2, nhead=4, dropout=0.1):
+    def __init__(self, feat_dim, num_heads, num_layers=2, nhead=4, dropout=None):
         super().__init__()
+        if dropout is None:
+            dropout = config.dropout
         self.num_heads = num_heads
         self.feat_dim = feat_dim
         pos_encoding = self._create_sinusoidal_encoding(num_heads, feat_dim)
@@ -218,7 +221,13 @@ class DigitsResnet101(nn.Module):
             self._extract_roi_feat(feat, gt_bboxes[:, h, :] if use_gt else bbox_outs[h], h)
             for h in range(self.num_heads)
         )
-        # 训练和验证时保持一致的逻辑
+        if not self.training:
+            refined = []
+            for h in range(self.num_heads):
+                p_no_digit = F.softmax(cls_outs[h].detach(), dim=1)[:, 10:11]
+                gated_roi = roi_cls[h] * (1 - p_no_digit)
+                refined.append(cls_outs[h] + gated_roi)
+            return tuple(refined)
         return tuple(cls_outs[h] + roi_cls[h] for h in range(self.num_heads))
 
     def set_roi_gt_prob(self, prob):

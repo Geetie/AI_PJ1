@@ -284,17 +284,17 @@ class BaseTrainer:
 
     def _setup_scheduler(self):
         if config.scheduler_type == 'warm_restarts':
-            warmup_scheduler = LinearLR(self.optimizer, start_factor=0.1,
+            warmup_scheduler = LinearLR(self.optimizer, start_factor=config.warmup_start_factor,
                                         total_iters=config.warmup_epochs)
             restart_scheduler = CosineAnnealingWarmRestarts(
-                self.optimizer, T_0=5, T_mult=2, eta_min=1e-6)
+                self.optimizer, T_0=config.scheduler_T0, T_mult=config.scheduler_T_mult, eta_min=config.scheduler_eta_min)
             return SequentialLR(self.optimizer,
                                 schedulers=[warmup_scheduler, restart_scheduler],
                                 milestones=[config.warmup_epochs])
-        warmup_scheduler = LinearLR(self.optimizer, start_factor=0.1,
+        warmup_scheduler = LinearLR(self.optimizer, start_factor=config.warmup_start_factor,
                                     total_iters=config.warmup_epochs)
         cosine_scheduler = CosineAnnealingLR(self.optimizer, T_max=config.epoches - config.warmup_epochs,
-                                             eta_min=1e-6)
+                                             eta_min=config.scheduler_eta_min)
         return SequentialLR(self.optimizer,
                             schedulers=[warmup_scheduler, cosine_scheduler],
                             milestones=[config.warmup_epochs])
@@ -302,9 +302,9 @@ class BaseTrainer:
     def _setup_scheduler_with_restarts(self):
         return CosineAnnealingWarmRestarts(
             self.optimizer,
-            T_0=5,
-            T_mult=2,
-            eta_min=1e-6
+            T_0=config.scheduler_T0,
+            T_mult=config.scheduler_T_mult,
+            eta_min=config.scheduler_eta_min
         )
 
     def _setup_scaler(self):
