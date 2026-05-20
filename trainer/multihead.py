@@ -23,7 +23,7 @@ from utils.compile_utils import (
     try_compile_model, warmup_model, get_raw_model, configure_dynamo_cache,
     CompileLogger, configure_compile_cache
 )
-from utils.seed import make_epoch_generator
+from utils.seed import make_epoch_generator, set_epoch_seed
 
 
 def _compute_joint_acc(pred_heads, labels, true_lengths, num_heads):
@@ -424,34 +424,33 @@ class MultiHeadTrainer(BaseTrainer):
         return DataLoader(dataset, **kwargs)
 
     def _pre_epoch_hook(self, epoch):
-        epoch_seed = self._base_seed + epoch * 1000
-        random.seed(epoch_seed)
-        np.random.seed(epoch_seed)
-        t.manual_seed(epoch_seed)
-        if t.cuda.is_available():
-            t.cuda.manual_seed_all(epoch_seed)
+        epoch_seed = set_epoch_seed(self._base_seed, epoch)
 
         raw_model = self._get_raw_model()
         if hasattr(raw_model, 'set_roi_gt_prob'):
             if epoch < config.warmup_epochs:
                 raw_model.set_roi_gt_prob(1.0)
             else:
-                decay_end = int(config.epoches * 0.6)
+                decay_end = int(config.epoches * 0.8)
                 if epoch >= decay_end:
                     raw_model.set_roi_gt_prob(0.0)
                 else:
                     progress = (epoch - config.warmup_epochs) / max(decay_end - config.warmup_epochs, 1)
-                    raw_model.set_roi_gt_prob(1.0 - progress)
+                    import math
+                    raw_model.set_roi_gt_prob(0.5 * (1 + math.cos(math.pi * progress)))
 
         self._cleanup_dataloader(self.train_loader)
-        self._train_generator = make_epoch_generator(self._base_seed, epoch=epoch)
+        # 使用与全局种子同步的生成器种子，确保数据加载顺序在每个epoch都不同
+        self._train_generator = make_epoch_generator(epoch_seed, epoch=epoch)
         self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
                                               shuffle=True, drop_last=True,
                                               generator=self._train_generator,
                                               persistent_override=False)
         self.logger.logger.info(
             f'[EPOCH-PRE] epoch={epoch+1} lr={self.optimizer.param_groups[0]["lr"]:.8f} '
-            f'roi_gt_prob={raw_model.roi_gt_prob:.2f} generator_seed={self._base_seed + epoch}')
+            f'roi_gt_prob={raw_model.roi_gt_prob:.2f} seed={epoch_seed}')
+        self.logger.logger.info(
+            f'[EPOCH-PRE] DataLoader generator seed={epoch_seed}, ensuring unique random sequence for this epoch')
 
     def _cleanup_dataloader(self, loader):
         if loader is not None:
@@ -564,10 +563,14 @@ class MultiHeadTrainer(BaseTrainer):
                             if empty_mask_h.sum() > 0:
                                 bbox_loss = bbox_loss + F.smooth_l1_loss(
                                     pred_bboxes[h][empty_mask_h], mean_bbox[empty_mask_h].detach()) * 0.3
+                epoch_ratio = (epoch + 1) / config.epoches
+                dynamic_ordering_weight = config.ordering_loss_weight * min(1.0, epoch_ratio * 2)
+                dynamic_attn_weight = config.attn_supervision_weight * min(1.0, epoch_ratio * 1.5)
+                
                 loss = (config.cls_loss_weight * cls_loss + config.bbox_loss_weight * bbox_loss
                         + config.attn_diversity_weight * div_loss
-                        + config.ordering_loss_weight * ord_loss
-                        + config.attn_supervision_weight * attn_sup_loss)
+                        + dynamic_ordering_weight * ord_loss
+                        + dynamic_attn_weight * attn_sup_loss)
 
                 aux_loss = t.tensor(0.0, device=self.device, requires_grad=True)
                 if len(head_cls_outs) > 0:

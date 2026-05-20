@@ -1,5 +1,3 @@
-import random
-
 import numpy as np
 import torch as t
 from torchvision import transforms
@@ -54,13 +52,13 @@ def apply_augmentation(img):
     img = transforms.RandomGrayscale(0.1)(img)
     if config.aug_rotation_degrees > 0:
         img = transforms.RandomRotation(config.aug_rotation_degrees, fill=127)(img)
-    if config.aug_blur_prob > 0 and random.random() < config.aug_blur_prob:
+    if config.aug_blur_prob > 0 and t.rand(1).item() < config.aug_blur_prob:
         img = transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5))(img)
-    if random.random() < 0.15:
+    if t.rand(1).item() < 0.15:
         img = _random_perspective_or_affine(distortion_scale=0.15, fill=127)(img)
-    if random.random() < 0.25:
+    if t.rand(1).item() < 0.25:
         img = transforms.RandomAdjustSharpness(sharpness_factor=2, p=0.6)(img)
-    if random.random() < 0.15:
+    if t.rand(1).item() < 0.15:
         img = transforms.RandomAutocontrast(p=0.5)(img)
     return img
 

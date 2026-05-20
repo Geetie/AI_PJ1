@@ -1,6 +1,5 @@
 import json
 import os
-import random
 from glob import glob
 
 import numpy as np
@@ -81,7 +80,7 @@ class CTCDataset(Dataset):
                 img = transforms.functional.crop(img, i, j, h_crop, w_crop)
                 img = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)(img)
                 img = transforms.RandomGrayscale(0.1)(img)
-                if random.random() < 0.3:
+                if t.rand(1).item() < 0.3:
                     img = _random_perspective_or_affine(distortion_scale=0.2, fill=127)(img)
             else:
                 img, _ = resize_keep_aspect(img, None, self.input_size[0])
@@ -97,7 +96,7 @@ class CTCDataset(Dataset):
                 img = transforms.functional.crop(img, i, j, h_crop, w_crop)
                 img = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)(img)
                 img = transforms.RandomGrayscale(0.1)(img)
-                if random.random() < 0.3:
+                if t.rand(1).item() < 0.3:
                     img = _random_perspective_or_affine(distortion_scale=0.2, fill=127)(img)
             else:
                 img = PadToSquare(fill=(127, 127, 127))(img)
