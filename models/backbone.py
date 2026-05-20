@@ -64,6 +64,11 @@ class FPNBackbone(nn.Module):
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
         )
+        self.l2_to_p1 = nn.Sequential(
+            nn.Conv2d(256, p1_ch, 1, bias=False),
+            nn.BatchNorm2d(p1_ch),
+            nn.ReLU(inplace=True),
+        )
         self.l3_reduce = nn.Sequential(
             nn.Conv2d(1024, 256, 1, bias=False),
             nn.BatchNorm2d(256),
@@ -123,8 +128,7 @@ class FPNBackbone(nn.Module):
         p3 = self.smooth_p3(p3)
         p2 = self.l2_reduce(c2) + F.interpolate(p3, size=c2.shape[2:], mode='bilinear', align_corners=False)
         p2 = self.smooth_p2(p2)
-        # 新增：融合P1层特征
-        p1 = self.l1_reduce(c1) + F.interpolate(p2, size=c1.shape[2:], mode='bilinear', align_corners=False)
+        p1 = self.l1_reduce(c1) + self.l2_to_p1(F.interpolate(p2, size=c1.shape[2:], mode='bilinear', align_corners=False))
         p1 = self.smooth_p1(p1)
         
         # 上采样所有特征到P1的分辨率进行融合
