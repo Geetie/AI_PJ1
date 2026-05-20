@@ -150,6 +150,7 @@ class Config:
     
     # FPN Multi-Head特有参数
     multiscale_feat_dim = 512
+    backbone_p1_channels = 128
     pos_embed_channels = 64
     feat_spatial_size = 40
     roi_refine = True

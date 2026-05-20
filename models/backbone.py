@@ -44,6 +44,7 @@ class FPNBackbone(nn.Module):
     def __init__(self):
         super().__init__()
         config = _get_config()
+        p1_ch = config.backbone_p1_channels
         
         backbone = resnet101(weights=ResNet101_Weights.IMAGENET1K_V1, 
                             replace_stride_with_dilation=[False, False, True])
@@ -53,10 +54,9 @@ class FPNBackbone(nn.Module):
         self.layer3 = backbone.layer3
         self.layer4 = backbone.layer4
         
-        # 改进：增加layer1的特征融合，提供更细粒度的空间信息
         self.l1_reduce = nn.Sequential(
-            nn.Conv2d(256, 128, 1, bias=False),
-            nn.BatchNorm2d(128),
+            nn.Conv2d(256, p1_ch, 1, bias=False),
+            nn.BatchNorm2d(p1_ch),
             nn.ReLU(inplace=True),
         )
         self.l2_reduce = nn.Sequential(
@@ -75,7 +75,6 @@ class FPNBackbone(nn.Module):
             nn.ReLU(inplace=True),
         )
         
-        # Smooth卷积用于减少上采样的棋盘效应
         self.smooth_p3 = nn.Sequential(
             nn.Conv2d(256, 256, 3, padding=1, bias=False),
             nn.BatchNorm2d(256),
@@ -87,15 +86,14 @@ class FPNBackbone(nn.Module):
             nn.ReLU(inplace=True),
         )
         self.smooth_p1 = nn.Sequential(
-            nn.Conv2d(128, 128, 3, padding=1, bias=False),
-            nn.BatchNorm2d(128),
+            nn.Conv2d(p1_ch, p1_ch, 3, padding=1, bias=False),
+            nn.BatchNorm2d(p1_ch),
             nn.ReLU(inplace=True),
         )
         
-        # 改进：融合P1/P2/P3/P4四个尺度的特征
-        # P1: 128 channels, P2: 256, P3: 256, P4: 256 -> total 896
+        fuse_in = p1_ch + 256 + 256 + 256
         self.fuse = nn.Sequential(
-            nn.Conv2d(896, config.multiscale_feat_dim, 3, padding=1, bias=False),
+            nn.Conv2d(fuse_in, config.multiscale_feat_dim, 3, padding=1, bias=False),
             nn.BatchNorm2d(config.multiscale_feat_dim),
             nn.ReLU(inplace=True),
         )

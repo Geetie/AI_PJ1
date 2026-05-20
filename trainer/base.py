@@ -17,6 +17,93 @@ from utils.compile_utils import get_raw_model as _get_raw_model_external
 from utils.platform import is_hip_error, is_cuda_error, is_nvidia_cuda
 
 
+def _convert_p1_channels(state_dict, model_sd):
+    converted = {}
+    converted_keys = []
+    p1_layers = {
+        'backbone.l1_reduce.0.weight',
+        'backbone.l1_reduce.1.weight',
+        'backbone.l1_reduce.1.bias',
+        'backbone.l1_reduce.1.running_mean',
+        'backbone.l1_reduce.1.running_var',
+        'backbone.smooth_p1.0.weight',
+        'backbone.smooth_p1.1.weight',
+        'backbone.smooth_p1.1.bias',
+        'backbone.smooth_p1.1.running_mean',
+        'backbone.smooth_p1.1.running_var',
+        'backbone.fuse.0.weight',
+    }
+    for k, v in state_dict.items():
+        if k not in model_sd or v.shape == model_sd[k].shape:
+            converted[k] = v
+            continue
+        if k not in p1_layers:
+            converted[k] = v
+            continue
+        target_shape = model_sd[k].shape
+        if k == 'backbone.l1_reduce.0.weight':
+            converted[k] = v[:target_shape[0]]
+            converted_keys.append(k)
+        elif k.startswith('backbone.l1_reduce.1.'):
+            converted[k] = v[:target_shape[0]]
+            converted_keys.append(k)
+        elif k == 'backbone.smooth_p1.0.weight':
+            converted[k] = v[:target_shape[0], :target_shape[1]]
+            converted_keys.append(k)
+        elif k.startswith('backbone.smooth_p1.1.'):
+            converted[k] = v[:target_shape[0]]
+            converted_keys.append(k)
+        elif k == 'backbone.fuse.0.weight':
+            old_p1 = v.shape[1] - 768
+            new_p1 = target_shape[1] - 768
+            if old_p1 > new_p1:
+                p1_part = v[:, :new_p1]
+                rest_part = v[:, old_p1:]
+                converted[k] = t.cat([p1_part, rest_part], dim=1)
+            else:
+                p1_part = v[:, :old_p1]
+                rest_part = v[:, old_p1:]
+                pad = t.zeros(target_shape[0], new_p1 - old_p1, *target_shape[2:])
+                converted[k] = t.cat([p1_part, pad, rest_part], dim=1)
+            converted_keys.append(k)
+        else:
+            converted[k] = v
+    return converted, converted_keys
+
+
+def _load_state_dict_compat(model, state_dict, strict=False):
+    model_sd = model.state_dict()
+    converted, converted_keys = _convert_p1_channels(state_dict, model_sd)
+    filtered = {}
+    skipped_keys = []
+    for k, v in converted.items():
+        if k in model_sd:
+            if v.shape == model_sd[k].shape:
+                filtered[k] = v
+            else:
+                skipped_keys.append((k, v.shape, model_sd[k].shape))
+        else:
+            if not strict:
+                filtered[k] = v
+    if converted_keys:
+        import logging as _logging
+        _logger = _logging.getLogger('checkpoint_compat')
+        _logger.info(
+            f'[CKPT-COMPAT] Converted {len(converted_keys)} P1-channel keys '
+            f'(old→new channel slicing)')
+    if skipped_keys:
+        import logging as _logging
+        _logger = _logging.getLogger('checkpoint_compat')
+        _logger.warning(
+            f'[CKPT-COMPAT] Skipped {len(skipped_keys)} keys with shape mismatch:')
+        for k, ckpt_shape, model_shape in skipped_keys[:10]:
+            _logger.warning(f'  {k}: checkpoint {list(ckpt_shape)} vs model {list(model_shape)}')
+        if len(skipped_keys) > 10:
+            _logger.warning(f'  ... and {len(skipped_keys) - 10} more')
+    incompatible = model.load_state_dict(filtered, strict=strict)
+    return incompatible, skipped_keys
+
+
 class TrainingLogger:
     def __init__(self, log_dir=None):
         if log_dir is None:

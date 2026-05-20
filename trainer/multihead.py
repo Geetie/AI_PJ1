@@ -18,7 +18,7 @@ from models import create_model
 from losses.classification import LabelSmoothEntropy
 from losses.attention import AttentionSupervisionLoss, attention_diversity_loss, spatial_ordering_loss
 from losses.augmentation import cutmix_data
-from trainer.base import BaseTrainer, ModelEMA
+from trainer.base import BaseTrainer, ModelEMA, _load_state_dict_compat
 from utils.compile_utils import (
     try_compile_model, warmup_model, get_raw_model, configure_dynamo_cache,
     CompileLogger, configure_compile_cache
@@ -77,12 +77,18 @@ class MultiHeadTrainer(BaseTrainer):
             ckpt = t.load(config.pretrained, map_location=self.device, weights_only=False)
             self._loaded_from_checkpoint = True
             if config.resume_weights_only:
-                self.model.load_state_dict(ckpt['model'], strict=False)
+                _, skipped = _load_state_dict_compat(self.model, ckpt['model'])
+                if skipped:
+                    self.logger.logger.info(f'[CKPT] resume_weights_only: skipped {len(skipped)} shape-mismatched keys')
             elif 'train_model' in ckpt:
-                self.model.load_state_dict(ckpt['train_model'], strict=False)
+                _, skipped = _load_state_dict_compat(self.model, ckpt['train_model'])
                 self.logger.logger.info('[CKPT] Loaded train_model weights (not EMA) for continued training')
+                if skipped:
+                    self.logger.logger.info(f'[CKPT] Skipped {len(skipped)} shape-mismatched keys in train_model')
             else:
-                self.model.load_state_dict(ckpt['model'], strict=False)
+                _, skipped = _load_state_dict_compat(self.model, ckpt['model'])
+                if skipped:
+                    self.logger.logger.info(f'[CKPT] Skipped {len(skipped)} shape-mismatched keys')
             if 'model_type' in ckpt:
                 self._model_type = ckpt['model_type']
             if config.resume_weights_only:
@@ -115,8 +121,10 @@ class MultiHeadTrainer(BaseTrainer):
         if config.pretrained is not None and not config.resume_weights_only:
             if 'model' in ckpt:
                 try:
-                    self.ema.ema.load_state_dict(ckpt['model'], strict=False)
+                    _, skipped = _load_state_dict_compat(self.ema.ema, ckpt['model'])
                     self.logger.logger.info('[CKPT] Restored EMA shadow model from checkpoint')
+                    if skipped:
+                        self.logger.logger.info(f'[CKPT] EMA shadow: skipped {len(skipped)} shape-mismatched keys')
                 except Exception as e:
                     self.logger.logger.warning(f'[CKPT] Failed to restore EMA shadow model: {e}')
             if 'best_checkpoint_path' in ckpt:

@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 from config import config
 from data.dataset import CTCDataset, ctc_collate_fn, ctc_test_collate_fn
 from models.ctc import CTCModel
-from trainer.base import BaseTrainer, ModelEMA
+from trainer.base import BaseTrainer, ModelEMA, _load_state_dict_compat
 from inference.decode import ctc_greedy_decode, ctc_beam_decode
 from utils.compile_utils import (
     try_compile_model, warmup_model, get_raw_model, CompileLogger, configure_compile_cache
@@ -36,20 +36,28 @@ class CTCTrainer(BaseTrainer):
         if config.pretrained is not None:
             ckpt = t.load(config.pretrained, map_location=self.device, weights_only=False)
             if config.resume_weights_only:
-                self.model.load_state_dict(ckpt['model'], strict=False)
+                _, skipped = _load_state_dict_compat(self.model, ckpt['model'])
+                if skipped:
+                    print(f'[CKPT] resume_weights_only: skipped {len(skipped)} shape-mismatched keys')
             elif 'train_model' in ckpt:
-                self.model.load_state_dict(ckpt['train_model'], strict=False)
+                _, skipped = _load_state_dict_compat(self.model, ckpt['train_model'])
                 print(f'[CKPT] Loaded train_model weights (not EMA) for continued training')
+                if skipped:
+                    print(f'[CKPT] Skipped {len(skipped)} shape-mismatched keys in train_model')
             else:
-                self.model.load_state_dict(ckpt['model'], strict=False)
+                _, skipped = _load_state_dict_compat(self.model, ckpt['model'])
+                if skipped:
+                    print(f'[CKPT] Skipped {len(skipped)} shape-mismatched keys')
             print(f'Load model from {config.pretrained}')
 
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
         if config.pretrained is not None and not config.resume_weights_only:
             if 'model' in ckpt:
                 try:
-                    self.ema.ema.load_state_dict(ckpt['model'], strict=False)
+                    _, skipped = _load_state_dict_compat(self.ema.ema, ckpt['model'])
                     self.logger.logger.info('[CKPT] Restored EMA shadow model from checkpoint')
+                    if skipped:
+                        self.logger.logger.info(f'[CKPT] EMA shadow: skipped {len(skipped)} shape-mismatched keys')
                 except Exception as e:
                     self.logger.logger.warning(f'[CKPT] Failed to restore EMA shadow model: {e}')
         self.criterion = nn.CTCLoss(blank=10, zero_infinity=True)
