@@ -558,6 +558,7 @@ class MultiHeadTrainer(BaseTrainer):
         print(f'[EPOCH {epoch+1}] DataLoader iterator created in {data_load_time:.2f}s')
 
         for i, (img, label, bbox_target, bbox_mask) in enumerate(tbar):
+            scaler_skipped = False
             t_data = time.time()
             if first_batch:
                 print(f'[BATCH0] data load time: {t_data - batch_start:.2f}s')
@@ -706,11 +707,15 @@ class MultiHeadTrainer(BaseTrainer):
                         self._nan_skip_count = 0
                         self.scaler = self._setup_scaler()
                         self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: Reset scaler due to persistent NaN/Inf gradients')
+                        scaler_skipped = True
                     elif (i + 1) % config.print_interval == 0 or first_batch:
                         self.logger.logger.warning(
                             f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN/Inf gradient detected, skipping optimizer step')
-                    scaler_skipped = True
-                    self.scaler.update()
+                        scaler_skipped = True
+                    else:
+                        scaler_skipped = False
+                    if not scaler_skipped:
+                        self.scaler.update()
                     self.ema.update(self.model)
                 else:
                     self.scaler.unscale_(self.optimizer)
@@ -747,6 +752,8 @@ class MultiHeadTrainer(BaseTrainer):
                             if (i + 1) % config.print_interval == 0 or first_batch:
                                 self.logger.logger.warning(
                                     f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() overflow, reset gradient and scaler')
+                        else:
+                            scaler_skipped = False
                     except Exception as e:
                         scaler_skipped = True
                         for p in self.model.parameters():
@@ -762,7 +769,8 @@ class MultiHeadTrainer(BaseTrainer):
                             self._nan_lr_reduced = True
                         self.logger.logger.warning(
                             f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() failed with error: {e}')
-                    self.scaler.update()
+                    if not scaler_skipped:
+                        self.scaler.update()
                     self.ema.update(self.model)
             if first_batch:
                 t.cuda.synchronize()
