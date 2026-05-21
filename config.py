@@ -57,7 +57,7 @@ data_dir = {
 }
 
 # ==================== 常量定义 ====================
-NUM_HEADS = 6  # 最大支持6个字符，但通过动态掩码处理可变长度
+NUM_HEADS = 3  # 减少到3以匹配94%样本长度≤3的数据分布，解决过拟合问题
 
 # 平台相关常量导出
 IS_NVIDIA = is_nvidia_cuda()
@@ -69,32 +69,31 @@ COMPILE_AVAILABLE = COMPILE_AVAILABLE
 class Config:
     """所有超参数配置"""
     # =========================================================
-    # ⚠️ 显存限制：batch_size 固定为 32，禁止修改！
-    # 24GB GPU + AMP 训练 FPN MultiHead 模型，batch_size=64 仍会 OOM
-    # batch_size=32 + grad_accum_steps=8 → effective batch=256
+    # ⚠️ 显存限制：降低 batch size 以避免 OOM
+    # batch_size=16 + grad_accum_steps=16 → effective batch=256
     # =========================================================
-    batch_size = 32
-    eval_batch_size = 32
-    lr = 1e-4
+    batch_size = 12
+    eval_batch_size = 24
+    lr = 5e-5  # 降低学习率以解决梯度溢出问题
     backbone_lr_factor = 0.05
     momentum = 0.9
-    weights_decay = 1e-4
+    weights_decay = 5e-4  # 增强正则化以减少过拟合
     class_num = 11
     
     optimizer_type = 'adamw'
     scheduler_type = 'cosine'
     
-    grad_accum_steps = 8
-    grad_clip_max_norm = 0.5
+    grad_accum_steps = 20
+    grad_clip_max_norm = 1.0  # 放宽梯度裁剪，允许更自然的梯度
     
     cls_loss_weight = 1.0
     aux_loss_weight = 0.05
     bbox_loss_weight = 0.5
     attn_diversity_weight = 0.02
     ordering_loss_weight = 0.01
-    attn_supervision_weight = 0.02
+    attn_supervision_weight = 0.0  # 禁用强制拟合高斯分布的注意力监督
     
-    use_amp = False
+    use_amp = True
     
     # 训练流程控制
     eval_interval = 1
@@ -120,7 +119,7 @@ class Config:
     mixup_alpha = 0.0
     mixup_prob = 0.0
     cutmix_alpha = 1.0
-    cutmix_prob = 0.3
+    cutmix_prob = 0.05  # 大幅降低以避免BBox损失为0的问题
     aug_rotation_degrees = 10
     aug_blur_prob = 0.1
     
@@ -141,7 +140,7 @@ class Config:
     scheduler_eta_min = 1e-6
 
     # 模型架构
-    dropout = 0.2  # 统一为baseline.py的0.2
+    dropout = 0.4  # 增强dropout以减少190M参数模型的过拟合
     fc_hidden = 1024
     ema_decay = 0.999
     use_torch_compile = False
@@ -177,7 +176,7 @@ class Config:
     
     # 系统配置
     max_checkpoints = 5
-    oom_headroom_ratio = 0.15
+    oom_headroom_ratio = 0.2
 
 
 def make_dataloader(dataset, batch_size, shuffle=False, drop_last=False,

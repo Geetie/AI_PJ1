@@ -58,8 +58,9 @@ def _compute_char_acc(pred_heads, labels, true_lengths, num_heads):
 
 def _apply_length_mask(pred_cls, length_logits, num_heads):
     pred_length = length_logits.argmax(dim=1)
+    length_conf = F.softmax(length_logits, dim=1).max(dim=1)[0]
     for h in range(num_heads):
-        mask = (pred_length <= h)
+        mask = (pred_length <= h) & (length_conf >= 0.3)
         if mask.any():
             pred_cls[h][mask, 10] = pred_cls[h][mask].amax(dim=1) + 100.0
 
@@ -520,41 +521,20 @@ class MultiHeadTrainer(BaseTrainer):
             self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
                                                 shuffle=False, drop_last=False)
 
-    def _apply_grad_clip_hook(self, max_grad_norm=100.0):
-        def _clip_hook(grad):
-            if grad is None:
-                return None
-            grad_norm = grad.norm()
-            if grad_norm > max_grad_norm:
-                scale = max_grad_norm / (grad_norm + 1e-6)
-                return grad * scale
-            return grad
-        
-        handles = []
-        for p in self.model.parameters():
-            if p.requires_grad:
-                handle = p.register_hook(lambda grad: _clip_hook(grad))
-                handles.append(handle)
-        return handles
-
-    def _remove_grad_hooks(self, handles):
-        for handle in handles:
-            handle.remove()
-
     def _setup_grad_clipping(self):
-        self._grad_clip_hooks = []
         self._grad_clip_max_norm = 100.0
-        self._grad_clip_hooks = self._apply_grad_clip_hook(self._grad_clip_max_norm)
-        self.logger.logger.info(f'[GRAD-CLIP] Registered backward hooks with max_grad_norm={self._grad_clip_max_norm}')
+        self.logger.logger.info(f'[GRAD-CLIP] Using clip_grad_norm_ with max_grad_norm={self._grad_clip_max_norm}')
 
     def _update_grad_clip_hooks(self, max_grad_norm):
-        if hasattr(self, '_grad_clip_hooks') and self._grad_clip_hooks:
-            self._remove_grad_hooks(self._grad_clip_hooks)
         self._grad_clip_max_norm = max_grad_norm
-        self._grad_clip_hooks = self._apply_grad_clip_hook(max_grad_norm)
+
+    def _do_grad_clip(self):
+        """统一的梯度裁剪方法，在optimizer.step()前调用"""
+        if hasattr(self, '_grad_clip_max_norm'):
+            t.nn.utils.clip_grad_norm_(self.model.parameters(), self._grad_clip_max_norm)
 
     def _train_epoch(self, epoch):
-        if not hasattr(self, '_grad_clip_hooks') or not self._grad_clip_hooks:
+        if not hasattr(self, '_grad_clip_max_norm'):
             self._setup_grad_clipping()
         self._update_grad_clip_hooks(50.0)
         joint_corrects = 0
@@ -631,6 +611,16 @@ class MultiHeadTrainer(BaseTrainer):
                     attn_sup_loss = self.attn_supervision(attn_maps, bbox_a, mask_a)
                     ord_loss = spatial_ordering_loss(attn_maps, bbox_preds=pred_bboxes, bbox_mask=mask_a)
                     bbox_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    if lam > 0:
+                        mixed_bbox_target = lam * bbox_a + (1 - lam) * bbox_b
+                    else:
+                        mixed_bbox_target = bbox_a
+                    for h in range(config.num_heads):
+                        mask_h = mask_a[:, h]
+                        if mask_h.sum() > 0:
+                            bbox_loss_h = F.smooth_l1_loss(
+                                pred_bboxes[h][mask_h > 0], mixed_bbox_target[:, h, :][mask_h > 0])
+                            bbox_loss = bbox_loss + bbox_loss_h
                 else:
                     div_loss = attention_diversity_loss(attn_maps)
                     attn_sup_loss = self.attn_supervision(attn_maps, bbox_target, bbox_mask)
@@ -957,7 +947,42 @@ class MultiHeadTrainer(BaseTrainer):
 
         for h in range(config.num_heads):
             if head_totals[h] > 0:
-                print(f'  Head {h+1} Char Acc: {head_corrects[h] / head_totals[h] * 100:.2f}% ({head_corrects[h]}/{head_totals[h]})')
+                acc = head_corrects[h] / head_totals[h] * 100
+                print(f'  Head {h+1} Char Acc: {acc:.2f}% ({head_corrects[h]}/{head_totals[h]})')
+                self.logger.logger.info(f'[PER-POS] Head {h+1}: acc={acc:.2f}% ({head_corrects[h]}/{head_totals[h]})')
+
+        if config.num_heads >= 3:
+            length2_corrects = 0
+            length2_totals = 0
+            length3_corrects = 0
+            length3_totals = 0
+            for i, (img, label, bbox_target, bbox_mask) in enumerate(self.val_loader):
+                if i > 0:
+                    break
+                img = img.to(self.device)
+                label = label.to(self.device)
+                bbox_mask = bbox_mask.to(self.device)
+                pred_cls, _, length_logits = model(img)
+                true_lengths = bbox_mask.sum(dim=1).long()
+                pred_masked = [p.clone() for p in pred_cls]
+                _apply_length_mask(pred_masked, length_logits, config.num_heads)
+                for b in range(img.size(0)):
+                    tlen = true_lengths[b].item()
+                    if tlen == 2:
+                        correct = all(pred_masked[h][b].argmax().item() == label[b, h].item() for h in range(2))
+                        length2_corrects += int(correct)
+                        length2_totals += 1
+                    elif tlen == 3:
+                        correct = all(pred_masked[h][b].argmax().item() == label[b, h].item() for h in range(3))
+                        length3_corrects += int(correct)
+                        length3_totals += 1
+                del img, label, pred_cls
+            if length2_totals > 0:
+                print(f'  Length-2 Joint Acc: {length2_corrects / length2_totals * 100:.2f}% ({length2_corrects}/{length2_totals})')
+                self.logger.logger.info(f'[PER-LEN] Length-2: acc={length2_corrects / length2_totals * 100:.2f}% ({length2_corrects}/{length2_totals})')
+            if length3_totals > 0:
+                print(f'  Length-3 Joint Acc: {length3_corrects / length3_totals * 100:.2f}% ({length3_corrects}/{length3_totals})')
+                self.logger.logger.info(f'[PER-LEN] Length-3: acc={length3_corrects / length3_totals * 100:.2f}% ({length3_corrects}/{length3_totals})')
 
         char_acc = char_corrects / max(total_chars, 1)
         joint_acc = joint_corrects / max(joint_total, 1)

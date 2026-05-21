@@ -568,10 +568,11 @@ class BaseTrainer:
                     headroom = total_gb * config.oom_headroom_ratio
                     if peak_gb > 0 and total_gb > 0:
                         safe_ratio = (total_gb - headroom) / peak_gb
-                        config.batch_size = max(int(config.batch_size * safe_ratio), 16)
+                        config.batch_size = max(int(config.batch_size * safe_ratio), 8)
                     else:
-                        config.batch_size = max(int(config.batch_size * 0.75), 16)
-                    config.grad_accum_steps = max(-(-self._original_effective_batch_size // config.batch_size), 1)
+                        config.batch_size = max(int(config.batch_size * 0.75), 8)
+                    effective_accum = max(-(-self._original_effective_batch_size // config.batch_size), 1)
+                    config.grad_accum_steps = min(effective_accum, 32)
                     self._stable_batch_size = None
                     new_effective_bs = config.batch_size * config.grad_accum_steps
                     old_effective_bs = old_bs * old_grad_accum
