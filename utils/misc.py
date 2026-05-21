@@ -4,8 +4,6 @@ from glob import glob
 import pandas as pd
 from torchvision import transforms
 
-from config import config
-
 
 class PadToSquare:
     def __init__(self, fill=0):
