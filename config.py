@@ -141,7 +141,7 @@ class Config:
 
     # 模型架构
     dropout = 0.4  # 增强dropout以减少190M参数模型的过拟合
-    fc_hidden = 1024
+    fc_hidden = 1026  # ⚠️ 修改为能被 NUM_HEADS(3) 整除的值 (1024 % 3 = 1 ❌, 1026 % 3 = 0 ✅)
     ema_decay = 0.999
     use_torch_compile = False
     use_gradient_checkpoint = True
