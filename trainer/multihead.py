@@ -700,6 +700,9 @@ class MultiHeadTrainer(BaseTrainer):
                 
                 if has_nan_grad:
                     self._nan_skip_count += 1
+                    self.scaler.unscale_(self.optimizer)
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
                     for p in self.model.parameters():
                         if p.grad is not None:
                             p.grad.zero_()
@@ -712,9 +715,7 @@ class MultiHeadTrainer(BaseTrainer):
                                 f'reducing LR {old_lr:.8f} -> {pg["lr"]:.8f}')
                         self._nan_lr_reduced = True
                         self._nan_skip_count = 0
-                        old_scale = self.scaler.get_scale()
-                        self.scaler = self._setup_scaler(init_scale=old_scale * 0.5)
-                        self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: Reset scaler (old_scale={old_scale:.1f}, new_scale={old_scale * 0.5:.1f}) due to persistent NaN/Inf gradients')
+                        self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: Persistent NaN/Inf gradients, scaler.update() will auto-reduce scale')
                     elif (i + 1) % config.print_interval == 0 or first_batch:
                         self.logger.logger.warning(
                             f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN/Inf gradient detected, skipping optimizer step')
@@ -739,11 +740,6 @@ class MultiHeadTrainer(BaseTrainer):
                         step_result = self.scaler.step(self.optimizer)
                         if step_result is None:
                             _batch_scaler_skipped = True
-                            for p in self.model.parameters():
-                                if p.grad is not None:
-                                    p.grad.zero_()
-                            old_scale = self.scaler.get_scale()
-                            self.scaler = self._setup_scaler(init_scale=old_scale * 0.5)
                             if not self._nan_lr_reduced:
                                 for pg in self.optimizer.param_groups:
                                     old_lr = pg['lr']
@@ -753,16 +749,13 @@ class MultiHeadTrainer(BaseTrainer):
                                 self._nan_lr_reduced = True
                             if (i + 1) % config.print_interval == 0 or first_batch:
                                 self.logger.logger.warning(
-                                    f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() overflow, reset gradient and scaler')
+                                    f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() overflow, scaler.update() will auto-reduce scale')
                         else:
                             _batch_scaler_skipped = False
                     except Exception as e:
                         _batch_scaler_skipped = True
-                        for p in self.model.parameters():
-                            if p.grad is not None:
-                                p.grad.zero_()
-                        old_scale = self.scaler.get_scale()
-                        self.scaler = self._setup_scaler(init_scale=old_scale * 0.5)
+                        self.logger.logger.warning(
+                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() failed with error: {e}')
                         if not self._nan_lr_reduced:
                             for pg in self.optimizer.param_groups:
                                 old_lr = pg['lr']
@@ -770,10 +763,13 @@ class MultiHeadTrainer(BaseTrainer):
                                 self.logger.logger.warning(
                                     f'[TRAIN] Epoch {epoch+1}: scaler.step() failed, reducing LR {old_lr:.8f} -> {pg["lr"]:.8f}')
                             self._nan_lr_reduced = True
-                        self.logger.logger.warning(
-                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() failed with error: {e}')
-                    if not _batch_scaler_skipped:
+                        try:
+                            self.scaler.update()
+                        except Exception:
+                            pass
+                    else:
                         self.scaler.update()
+                    if not _batch_scaler_skipped:
                         self.ema.update(self.model)
                     else:
                         scaler_skip_count += 1
