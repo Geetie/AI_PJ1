@@ -564,6 +564,7 @@ class MultiHeadTrainer(BaseTrainer):
         total_chars = 0
         digit_corrects = 0
         digit_total = 0
+        total_loss = 0.0
         batch_start = time.time()
         self.model.train()
         first_batch = True
