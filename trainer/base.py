@@ -316,8 +316,6 @@ class ModelEMA:
         with t.no_grad():
             for ema_p, model_p in zip(self.ema.parameters(), model.parameters()):
                 ema_p.data.mul_(self.decay).add_(model_p.data.to(self.device), alpha=1 - self.decay)
-            for ema_b, model_b in zip(self.ema.buffers(), model.buffers()):
-                ema_b.data.copy_(model_b.data.to(self.device))
 
     def to_device(self, device=None):
         target_device = device or self.device

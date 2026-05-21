@@ -6,13 +6,19 @@ import torch.nn.functional as F
 def compute_single_gaussian_kl(attn_single, cx, cy, bw, bh, h, w):
     grid_y = t.arange(h, device=attn_single.device, dtype=t.float32).view(1, h, 1) / h
     grid_x = t.arange(w, device=attn_single.device, dtype=t.float32).view(1, 1, w) / w
-    sigma_x = bw / 2.5
-    sigma_y = bh / 2.5
-    gauss = t.exp(-((grid_x - cx.view(-1, 1, 1)) ** 2 / (2 * sigma_x.view(-1, 1, 1) ** 2) +
-                    (grid_y - cy.view(-1, 1, 1)) ** 2 / (2 * sigma_y.view(-1, 1, 1) ** 2)))
-    s = gauss.sum(dim=(1, 2), keepdim=True).clamp(min=1e-8)
-    gauss = gauss / s
-    return F.kl_div(gauss.clamp(min=1e-8).log(), attn_single.clamp(min=1e-8), reduction='batchmean')
+    sigma_x = (bw / 2.5).clamp(min=0.01)
+    sigma_y = (bh / 2.5).clamp(min=0.01)
+    sq_x = (grid_x - cx.view(-1, 1, 1)) ** 2 / (2 * sigma_x.view(-1, 1, 1) ** 2 + 1e-8)
+    sq_y = (grid_y - cy.view(-1, 1, 1)) ** 2 / (2 * sigma_y.view(-1, 1, 1) ** 2 + 1e-8)
+    sq_sum = (sq_x + sq_y).clamp(max=50.0)
+    gauss = t.exp(-sq_sum)
+    gauss_sum = gauss.sum(dim=(1, 2), keepdim=True).clamp(min=1e-8)
+    gauss = gauss / gauss_sum
+    pred_safe = attn_single.clamp(min=1e-7, max=1.0 - 1e-7)
+    pred_safe = pred_safe / pred_safe.sum(dim=(1, 2), keepdim=True).clamp(min=1e-8)
+    log_ratio = (gauss / pred_safe.clamp(min=1e-30)).log().clamp(min=-100, max=100)
+    kl = (gauss * log_ratio).sum(dim=(1, 2)).mean()
+    return kl.clamp(max=100.0)
 
 
 class AttentionSupervisionLoss(nn.Module):

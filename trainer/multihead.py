@@ -79,6 +79,9 @@ class MultiHeadTrainer(BaseTrainer):
 
         self._loaded_from_checkpoint = False
         self._optimizer_state_lost = False
+        self._nan_skip_count = 0
+        self._nan_skip_threshold = 3
+        self._nan_lr_reduced = False
 
         if config.pretrained is not None:
             ckpt = t.load(config.pretrained, map_location=self.device, weights_only=False)
@@ -423,8 +426,14 @@ class MultiHeadTrainer(BaseTrainer):
             length = min(len(mark['label']), config.num_heads)
             length_counts[length] += 1
         total = length_counts.sum()
-        length_weights = total / (length_counts * (config.num_heads + 1) + 1e-6)
-        length_weights = length_weights / length_weights.mean()
+        
+        mask = length_counts > 0
+        length_weights = t.zeros_like(length_counts)
+        
+        if mask.any():
+            length_weights[mask] = total / (length_counts[mask] * (config.num_heads + 1))
+            length_weights[mask] = length_weights[mask] / length_weights[mask].mean()
+        
         length_weights = length_weights.to(self.device)
         self.logger.logger.info(f'Computed length weights from JSON: {length_weights.cpu().numpy()}')
         for l in range(config.num_heads + 1):
@@ -630,18 +639,73 @@ class MultiHeadTrainer(BaseTrainer):
                 loss = loss + config.aux_loss_weight * aux_loss
                 length_target = true_lengths.clamp(max=config.num_heads)
                 length_loss = self.length_criterion(length_logits, length_target)
-                length_loss_weight = 3.0 * min(1.0, (epoch + 1) / max(config.warmup_epochs, 1))
+                length_loss_weight = min(3.0, (epoch + 1) / max(config.warmup_epochs, 1))
                 loss = loss + length_loss_weight * length_loss
                 loss = loss / config.grad_accum_steps
+
+                loss_value = loss.detach()
+                if t.isnan(loss_value).any() or t.isinf(loss_value).any():
+                    if (i + 1) % config.print_interval == 0 or first_batch:
+                        self.logger.logger.warning(
+                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN/Inf loss detected (loss={loss_value.item():.4f}), using safe loss')
+                    loss = loss.clamp(max=10.0, min=-10.0)
 
             self.scaler.scale(loss).backward()
 
             if (i + 1) % config.grad_accum_steps == 0 or (i + 1) == len(tbar):
                 self.scaler.unscale_(self.optimizer)
                 t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=config.grad_clip_max_norm)
-                step_result = self.scaler.step(self.optimizer)
-                if step_result is None:
+                
+                grad_norm = 0.0
+                has_nan_grad = False
+                grad_total = 0
+                for p in self.model.parameters():
+                    if p.grad is not None:
+                        grad_total += 1
+                        grad_norm += p.grad.norm().item() ** 2
+                        if t.isnan(p.grad).any() or t.isinf(p.grad).any():
+                            has_nan_grad = True
+                            break
+                grad_norm = grad_norm ** 0.5 if grad_total > 0 else 0.0
+                
+                if has_nan_grad or grad_norm > 1000.0:
+                    self._nan_skip_count += 1
+                    for p in self.model.parameters():
+                        if p.grad is not None:
+                            p.grad.zero_()
+                    if self._nan_skip_count >= self._nan_skip_threshold and not self._nan_lr_reduced:
+                        for pg in self.optimizer.param_groups:
+                            old_lr = pg['lr']
+                            pg['lr'] = pg['lr'] * 0.5
+                            self.logger.logger.warning(
+                                f'[TRAIN] Epoch {epoch+1}: NaN/Inf gradient for {self._nan_skip_count} consecutive batches, '
+                                f'reducing LR {old_lr:.8f} -> {pg["lr"]:.8f}')
+                        self._nan_lr_reduced = True
+                        self._nan_skip_count = 0
+                        self.scaler = self._setup_scaler()
+                        self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: Reset scaler due to persistent NaN/Inf gradients')
+                    elif (i + 1) % config.print_interval == 0 or first_batch:
+                        if grad_norm > 1000.0:
+                            self.logger.logger.warning(
+                                f'[TRAIN] Epoch {epoch+1} Batch {i+1}: Exploding gradient detected (norm={grad_norm:.2f}), skipping optimizer step')
+                        else:
+                            self.logger.logger.warning(
+                                f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN/Inf gradient detected (skip #{self._nan_skip_count}), skipping optimizer step')
                     scaler_skipped = True
+                else:
+                    if self._nan_skip_count > 0 and not self._nan_lr_reduced:
+                        self._nan_skip_count = 0
+                    try:
+                        step_result = self.scaler.step(self.optimizer)
+                        if step_result is None:
+                            scaler_skipped = True
+                            self.logger.logger.warning(
+                                f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() returned None, possible overflow detected')
+                    except Exception as e:
+                        scaler_skipped = True
+                        self.logger.logger.warning(
+                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() failed with error: {e}')
+                        self.scaler = self._setup_scaler()
                 self.scaler.update()
                 self.ema.update(self.model)
             if first_batch:
@@ -698,7 +762,7 @@ class MultiHeadTrainer(BaseTrainer):
 
     def _eval(self):
         if self.ema is not None:
-            model = self.ema.to_device(self.device)
+            model = self.ema.ema
         else:
             model = self._get_raw_model()
         model.eval()
@@ -785,7 +849,7 @@ class MultiHeadTrainer(BaseTrainer):
 
     def eval_detailed(self):
         if self.ema is not None:
-            model = self.ema.to_device(self.device)
+            model = self.ema.ema
         else:
             model = self._get_raw_model()
         model.eval()
@@ -795,6 +859,7 @@ class MultiHeadTrainer(BaseTrainer):
         total_chars = 0
         joint_corrects = 0
         joint_total = 0
+        raw_joint_corrects = 0
         with t.no_grad():
             for img, label, bbox_target, bbox_mask in tqdm(self.val_loader, desc='Detailed Eval'):
                 img = img.to(self.device)
@@ -803,6 +868,9 @@ class MultiHeadTrainer(BaseTrainer):
                 pred_cls, _, length_logits = model(img)
 
                 true_lengths = bbox_mask.sum(dim=1).long()
+
+                # 先计算 raw_joint (不带 length_mask)
+                raw_joint_corrects += _compute_joint_acc([p.clone() for p in pred_cls], label, true_lengths, config.num_heads)
 
                 for h in range(config.num_heads):
                     valid_mask = (true_lengths > h).float()
@@ -813,7 +881,10 @@ class MultiHeadTrainer(BaseTrainer):
                 char_corrects += c_corrects
                 total_chars += c_total
 
-                joint_corrects += _compute_joint_acc(pred_cls, label, true_lengths, config.num_heads)
+                # 再计算 masked_joint
+                pred_masked = [p.clone() for p in pred_cls]
+                _apply_length_mask(pred_masked, length_logits, config.num_heads)
+                joint_corrects += _compute_joint_acc(pred_masked, label, true_lengths, config.num_heads)
                 joint_total += img.size(0)
 
                 del img, label, pred_cls
@@ -824,16 +895,17 @@ class MultiHeadTrainer(BaseTrainer):
 
         char_acc = char_corrects / max(total_chars, 1)
         joint_acc = joint_corrects / max(joint_total, 1)
-        print(f'  Overall Char Acc: {char_acc * 100:.2f}%  |  Joint Acc: {joint_acc * 100:.2f}%')
+        raw_joint_acc = raw_joint_corrects / max(joint_total, 1)
+        print(f'  Overall Char Acc: {char_acc * 100:.2f}%  |  Raw Joint: {raw_joint_acc * 100:.2f}%  |  Masked Joint: {joint_acc * 100:.2f}%')
 
         t.cuda.empty_cache()
         self.model.train()
 
-        return joint_acc
+        return raw_joint_acc
 
     def eval_tta(self):
         if self.ema is not None:
-            model = self.ema.to_device(self.device)
+            model = self.ema.ema
         else:
             model = self._get_raw_model()
         model.eval()
