@@ -75,27 +75,26 @@ class Config:
     # =========================================================
     batch_size = 32
     eval_batch_size = 32
-    lr = 2e-3
-    backbone_lr_factor = 0.1
+    lr = 1e-4
+    backbone_lr_factor = 0.05
     momentum = 0.9
-    weights_decay = 5e-4
+    weights_decay = 1e-4
     class_num = 11
     
-    optimizer_type = 'sgd'
-    scheduler_type = 'warm_restarts'
+    optimizer_type = 'adamw'
+    scheduler_type = 'cosine'
     
-    # 梯度累积与裁剪
-    # batch_size=32 → effective batch = 32 * 8 = 256，与 batch=128 时一致
     grad_accum_steps = 8
-    grad_clip_max_norm = 5.0
+    grad_clip_max_norm = 0.5
     
-    # Loss权重
     cls_loss_weight = 1.0
-    aux_loss_weight = 0.15
-    bbox_loss_weight = 5.0
-    attn_diversity_weight = 0.1
-    ordering_loss_weight = 0.05
-    attn_supervision_weight = 0.15
+    aux_loss_weight = 0.05
+    bbox_loss_weight = 0.5
+    attn_diversity_weight = 0.02
+    ordering_loss_weight = 0.01
+    attn_supervision_weight = 0.02
+    
+    use_amp = False
     
     # 训练流程控制
     eval_interval = 1

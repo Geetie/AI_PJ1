@@ -520,8 +520,43 @@ class MultiHeadTrainer(BaseTrainer):
             self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
                                                 shuffle=False, drop_last=False)
 
+    def _apply_grad_clip_hook(self, max_grad_norm=100.0):
+        def _clip_hook(grad):
+            if grad is None:
+                return None
+            grad_norm = grad.norm()
+            if grad_norm > max_grad_norm:
+                scale = max_grad_norm / (grad_norm + 1e-6)
+                return grad * scale
+            return grad
+        
+        handles = []
+        for p in self.model.parameters():
+            if p.requires_grad:
+                handle = p.register_hook(lambda grad: _clip_hook(grad))
+                handles.append(handle)
+        return handles
+
+    def _remove_grad_hooks(self, handles):
+        for handle in handles:
+            handle.remove()
+
+    def _setup_grad_clipping(self):
+        self._grad_clip_hooks = []
+        self._grad_clip_max_norm = 100.0
+        self._grad_clip_hooks = self._apply_grad_clip_hook(self._grad_clip_max_norm)
+        self.logger.logger.info(f'[GRAD-CLIP] Registered backward hooks with max_grad_norm={self._grad_clip_max_norm}')
+
+    def _update_grad_clip_hooks(self, max_grad_norm):
+        if hasattr(self, '_grad_clip_hooks') and self._grad_clip_hooks:
+            self._remove_grad_hooks(self._grad_clip_hooks)
+        self._grad_clip_max_norm = max_grad_norm
+        self._grad_clip_hooks = self._apply_grad_clip_hook(max_grad_norm)
+
     def _train_epoch(self, epoch):
-        total_loss = 0
+        if not hasattr(self, '_grad_clip_hooks') or not self._grad_clip_hooks:
+            self._setup_grad_clipping()
+        self._update_grad_clip_hooks(50.0)
         joint_corrects = 0
         joint_total = 0
         raw_joint_corrects = 0
@@ -653,22 +688,18 @@ class MultiHeadTrainer(BaseTrainer):
             self.scaler.scale(loss).backward()
 
             if (i + 1) % config.grad_accum_steps == 0 or (i + 1) == len(tbar):
-                self.scaler.unscale_(self.optimizer)
-                t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=config.grad_clip_max_norm)
-                
-                grad_norm = 0.0
+                grad_norm_before_clip = 0.0
                 has_nan_grad = False
                 grad_total = 0
                 for p in self.model.parameters():
                     if p.grad is not None:
                         grad_total += 1
-                        grad_norm += p.grad.norm().item() ** 2
+                        grad_norm_before_clip += p.grad.norm().item() ** 2
                         if t.isnan(p.grad).any() or t.isinf(p.grad).any():
                             has_nan_grad = True
-                            break
-                grad_norm = grad_norm ** 0.5 if grad_total > 0 else 0.0
+                grad_norm_before_clip = grad_norm_before_clip ** 0.5 if grad_total > 0 else 0.0
                 
-                if has_nan_grad or grad_norm > 1000.0:
+                if has_nan_grad:
                     self._nan_skip_count += 1
                     for p in self.model.parameters():
                         if p.grad is not None:
@@ -676,7 +707,7 @@ class MultiHeadTrainer(BaseTrainer):
                     if self._nan_skip_count >= self._nan_skip_threshold and not self._nan_lr_reduced:
                         for pg in self.optimizer.param_groups:
                             old_lr = pg['lr']
-                            pg['lr'] = pg['lr'] * 0.5
+                            pg['lr'] = pg['lr'] * 0.2
                             self.logger.logger.warning(
                                 f'[TRAIN] Epoch {epoch+1}: NaN/Inf gradient for {self._nan_skip_count} consecutive batches, '
                                 f'reducing LR {old_lr:.8f} -> {pg["lr"]:.8f}')
@@ -685,29 +716,63 @@ class MultiHeadTrainer(BaseTrainer):
                         self.scaler = self._setup_scaler()
                         self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: Reset scaler due to persistent NaN/Inf gradients')
                     elif (i + 1) % config.print_interval == 0 or first_batch:
-                        if grad_norm > 1000.0:
-                            self.logger.logger.warning(
-                                f'[TRAIN] Epoch {epoch+1} Batch {i+1}: Exploding gradient detected (norm={grad_norm:.2f}), skipping optimizer step')
-                        else:
-                            self.logger.logger.warning(
-                                f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN/Inf gradient detected (skip #{self._nan_skip_count}), skipping optimizer step')
+                        self.logger.logger.warning(
+                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN/Inf gradient detected, skipping optimizer step')
                     scaler_skipped = True
+                    self.scaler.update()
+                    self.ema.update(self.model)
                 else:
-                    if self._nan_skip_count > 0 and not self._nan_lr_reduced:
-                        self._nan_skip_count = 0
+                    self.scaler.unscale_(self.optimizer)
+                    clip_norm = min(grad_norm_before_clip, 1000.0) if grad_norm_before_clip > 0 else config.grad_clip_max_norm
+                    t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=clip_norm)
+                    
+                    grad_norm_after_clip = 0.0
+                    for p in self.model.parameters():
+                        if p.grad is not None:
+                            grad_norm_after_clip += p.grad.norm().item() ** 2
+                    grad_norm_after_clip = grad_norm_after_clip ** 0.5 if grad_total > 0 else 0.0
+                    
+                    if grad_norm_after_clip > 500.0:
+                        t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
+                        if (i + 1) % config.print_interval == 0 or first_batch:
+                            self.logger.logger.warning(
+                                f'[TRAIN] Epoch {epoch+1} Batch {i+1}: Severe gradient explosion (before={grad_norm_before_clip:.2f}, after={grad_norm_after_clip:.2f}), aggressively clipped to 10.0')
+                    
                     try:
                         step_result = self.scaler.step(self.optimizer)
                         if step_result is None:
                             scaler_skipped = True
-                            self.logger.logger.warning(
-                                f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() returned None, possible overflow detected')
+                            for p in self.model.parameters():
+                                if p.grad is not None:
+                                    p.grad.zero_()
+                            self.scaler = self._setup_scaler()
+                            if not self._nan_lr_reduced:
+                                for pg in self.optimizer.param_groups:
+                                    old_lr = pg['lr']
+                                    pg['lr'] = pg['lr'] * 0.5
+                                    self.logger.logger.warning(
+                                        f'[TRAIN] Epoch {epoch+1}: scaler.step() overflow, reducing LR {old_lr:.8f} -> {pg["lr"]:.8f}')
+                                self._nan_lr_reduced = True
+                            if (i + 1) % config.print_interval == 0 or first_batch:
+                                self.logger.logger.warning(
+                                    f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() overflow, reset gradient and scaler')
                     except Exception as e:
                         scaler_skipped = True
+                        for p in self.model.parameters():
+                            if p.grad is not None:
+                                p.grad.zero_()
+                        self.scaler = self._setup_scaler()
+                        if not self._nan_lr_reduced:
+                            for pg in self.optimizer.param_groups:
+                                old_lr = pg['lr']
+                                pg['lr'] = pg['lr'] * 0.5
+                                self.logger.logger.warning(
+                                    f'[TRAIN] Epoch {epoch+1}: scaler.step() failed, reducing LR {old_lr:.8f} -> {pg["lr"]:.8f}')
+                            self._nan_lr_reduced = True
                         self.logger.logger.warning(
                             f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() failed with error: {e}')
-                        self.scaler = self._setup_scaler()
-                self.scaler.update()
-                self.ema.update(self.model)
+                    self.scaler.update()
+                    self.ema.update(self.model)
             if first_batch:
                 t.cuda.synchronize()
                 t_backward = time.time()

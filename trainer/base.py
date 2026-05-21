@@ -338,7 +338,7 @@ class BaseTrainer:
 
     def __init__(self):
         self.device = t.device('cuda') if t.cuda.is_available() else t.device('cpu')
-        self.use_amp = self.device.type == 'cuda'
+        self.use_amp = getattr(config, 'use_amp', True) and self.device.type == 'cuda'
         self.best_acc = 0
         self.best_checkpoint_path = ''
         self.train_log = []
