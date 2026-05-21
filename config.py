@@ -72,7 +72,7 @@ class Config:
     # GPU 利用率优化：A10 22.2GB，batch_size=12 仅用 5.7GB (26%)
     # batch_size=32 + grad_accum_steps=8 → effective batch=256
     # =========================================================
-    batch_size = 32
+    batch_size = 48
     eval_batch_size = 48
     lr = 5e-5  # 降低学习率以解决梯度溢出问题
     backbone_lr_factor = 0.05
@@ -83,8 +83,8 @@ class Config:
     optimizer_type = 'adamw'
     scheduler_type = 'cosine'
     
-    grad_accum_steps = 8
-    grad_clip_max_norm = 1.0  # 放宽梯度裁剪，允许更自然的梯度
+    grad_accum_steps = 6
+    grad_clip_max_norm = 5.0  # 放宽梯度裁剪，允许更自然的梯度
     
     cls_loss_weight = 1.0
     aux_loss_weight = 0.05

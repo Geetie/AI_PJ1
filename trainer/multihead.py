@@ -524,7 +524,7 @@ class MultiHeadTrainer(BaseTrainer):
                                                 shuffle=False, drop_last=False)
 
     def _setup_grad_clipping(self):
-        self._grad_clip_max_norm = 100.0
+        self._grad_clip_max_norm = config.grad_clip_max_norm
         self.logger.logger.info(f'[GRAD-CLIP] Using clip_grad_norm_ with max_grad_norm={self._grad_clip_max_norm}')
 
     def _update_grad_clip_hooks(self, max_grad_norm):
@@ -538,7 +538,6 @@ class MultiHeadTrainer(BaseTrainer):
     def _train_epoch(self, epoch):
         if not hasattr(self, '_grad_clip_max_norm'):
             self._setup_grad_clipping()
-        self._update_grad_clip_hooks(50.0)
         joint_corrects = 0
         joint_total = 0
         raw_joint_corrects = 0
@@ -700,6 +699,7 @@ class MultiHeadTrainer(BaseTrainer):
                 
                 if has_nan_grad:
                     self._nan_skip_count += 1
+                    _batch_scaler_skipped = True
                     self.scaler.unscale_(self.optimizer)
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
@@ -724,29 +724,10 @@ class MultiHeadTrainer(BaseTrainer):
                     self.scaler.unscale_(self.optimizer)
                     t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self._grad_clip_max_norm)
                     
-                    grad_norm_after_clip = 0.0
-                    for p in self.model.parameters():
-                        if p.grad is not None:
-                            grad_norm_after_clip += p.grad.norm().item() ** 2
-                    grad_norm_after_clip = grad_norm_after_clip ** 0.5 if grad_total > 0 else 0.0
-                    
-                    if grad_norm_after_clip > 500.0:
-                        t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
-                        if (i + 1) % config.print_interval == 0 or first_batch:
-                            self.logger.logger.warning(
-                                f'[TRAIN] Epoch {epoch+1} Batch {i+1}: Severe gradient explosion (before={grad_norm_before_clip:.2f}, after={grad_norm_after_clip:.2f}), aggressively clipped to 10.0')
-                    
                     try:
                         step_result = self.scaler.step(self.optimizer)
                         if step_result is None:
                             _batch_scaler_skipped = True
-                            if not self._nan_lr_reduced:
-                                for pg in self.optimizer.param_groups:
-                                    old_lr = pg['lr']
-                                    pg['lr'] = pg['lr'] * 0.5
-                                    self.logger.logger.warning(
-                                        f'[TRAIN] Epoch {epoch+1}: scaler.step() overflow, reducing LR {old_lr:.8f} -> {pg["lr"]:.8f}')
-                                self._nan_lr_reduced = True
                             if (i + 1) % config.print_interval == 0 or first_batch:
                                 self.logger.logger.warning(
                                     f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() overflow, scaler.update() will auto-reduce scale')
@@ -756,13 +737,6 @@ class MultiHeadTrainer(BaseTrainer):
                         _batch_scaler_skipped = True
                         self.logger.logger.warning(
                             f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() failed with error: {e}')
-                        if not self._nan_lr_reduced:
-                            for pg in self.optimizer.param_groups:
-                                old_lr = pg['lr']
-                                pg['lr'] = pg['lr'] * 0.5
-                                self.logger.logger.warning(
-                                    f'[TRAIN] Epoch {epoch+1}: scaler.step() failed, reducing LR {old_lr:.8f} -> {pg["lr"]:.8f}')
-                            self._nan_lr_reduced = True
                         try:
                             self.scaler.update()
                         except Exception:

@@ -473,9 +473,9 @@ class BaseTrainer:
 
     def _setup_scaler(self, init_scale=None):
         if init_scale is not None:
-            scaler = GradScaler(self.device.type, enabled=self.use_amp, init_scale=init_scale)
+            scaler = GradScaler(self.device.type, enabled=self.use_amp, init_scale=init_scale, growth_interval=500)
         else:
-            scaler = GradScaler(self.device.type, enabled=self.use_amp, init_scale=2**10)
+            scaler = GradScaler(self.device.type, enabled=self.use_amp, init_scale=2**8, growth_interval=500)
         return scaler
 
     def _pre_epoch_hook(self, epoch):
