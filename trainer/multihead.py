@@ -474,6 +474,8 @@ class MultiHeadTrainer(BaseTrainer):
 
     def _pre_epoch_hook(self, epoch):
         epoch_seed = set_epoch_seed(self._base_seed, epoch)
+        self._nan_lr_reduced = False
+        self._nan_skip_count = 0
 
         raw_model = self._get_raw_model()
         if hasattr(raw_model, 'set_roi_gt_prob'):
@@ -549,7 +551,7 @@ class MultiHeadTrainer(BaseTrainer):
         self.model.train()
         first_batch = True
         data_load_time = 0.0
-        scaler_skipped = False
+        scaler_skip_count = 0
 
         print(f'[EPOCH {epoch+1}] Waiting for first batch from DataLoader...')
         t_load_start = time.time()
@@ -558,7 +560,7 @@ class MultiHeadTrainer(BaseTrainer):
         print(f'[EPOCH {epoch+1}] DataLoader iterator created in {data_load_time:.2f}s')
 
         for i, (img, label, bbox_target, bbox_mask) in enumerate(tbar):
-            scaler_skipped = False
+            _batch_scaler_skipped = False
             t_data = time.time()
             if first_batch:
                 print(f'[BATCH0] data load time: {t_data - batch_start:.2f}s')
@@ -671,10 +673,15 @@ class MultiHeadTrainer(BaseTrainer):
                 loss = loss / config.grad_accum_steps
 
                 loss_value = loss.detach()
-                if t.isnan(loss_value).any() or t.isinf(loss_value).any():
+                if t.isnan(loss_value).any():
                     if (i + 1) % config.print_interval == 0 or first_batch:
                         self.logger.logger.warning(
-                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN/Inf loss detected (loss={loss_value.item():.4f}), using safe loss')
+                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN loss detected (loss={loss_value.item():.4f}), using zero loss')
+                    loss = loss * 0.0
+                elif t.isinf(loss_value).any():
+                    if (i + 1) % config.print_interval == 0 or first_batch:
+                        self.logger.logger.warning(
+                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: Inf loss detected (loss={loss_value.item():.4f}), clamping')
                     loss = loss.clamp(max=10.0, min=-10.0)
 
             self.scaler.scale(loss).backward()
@@ -705,22 +712,16 @@ class MultiHeadTrainer(BaseTrainer):
                                 f'reducing LR {old_lr:.8f} -> {pg["lr"]:.8f}')
                         self._nan_lr_reduced = True
                         self._nan_skip_count = 0
-                        self.scaler = self._setup_scaler()
-                        self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: Reset scaler due to persistent NaN/Inf gradients')
-                        scaler_skipped = True
+                        old_scale = self.scaler.get_scale()
+                        self.scaler = self._setup_scaler(init_scale=old_scale * 0.5)
+                        self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: Reset scaler (old_scale={old_scale:.1f}, new_scale={old_scale * 0.5:.1f}) due to persistent NaN/Inf gradients')
                     elif (i + 1) % config.print_interval == 0 or first_batch:
                         self.logger.logger.warning(
                             f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN/Inf gradient detected, skipping optimizer step')
-                        scaler_skipped = True
-                    else:
-                        scaler_skipped = False
-                    if not scaler_skipped:
-                        self.scaler.update()
-                    self.ema.update(self.model)
                 else:
+                    self._nan_skip_count = 0
                     self.scaler.unscale_(self.optimizer)
-                    clip_norm = min(grad_norm_before_clip, 1000.0) if grad_norm_before_clip > 0 else config.grad_clip_max_norm
-                    t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=clip_norm)
+                    t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self._grad_clip_max_norm)
                     
                     grad_norm_after_clip = 0.0
                     for p in self.model.parameters():
@@ -737,11 +738,12 @@ class MultiHeadTrainer(BaseTrainer):
                     try:
                         step_result = self.scaler.step(self.optimizer)
                         if step_result is None:
-                            scaler_skipped = True
+                            _batch_scaler_skipped = True
                             for p in self.model.parameters():
                                 if p.grad is not None:
                                     p.grad.zero_()
-                            self.scaler = self._setup_scaler()
+                            old_scale = self.scaler.get_scale()
+                            self.scaler = self._setup_scaler(init_scale=old_scale * 0.5)
                             if not self._nan_lr_reduced:
                                 for pg in self.optimizer.param_groups:
                                     old_lr = pg['lr']
@@ -753,13 +755,14 @@ class MultiHeadTrainer(BaseTrainer):
                                 self.logger.logger.warning(
                                     f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() overflow, reset gradient and scaler')
                         else:
-                            scaler_skipped = False
+                            _batch_scaler_skipped = False
                     except Exception as e:
-                        scaler_skipped = True
+                        _batch_scaler_skipped = True
                         for p in self.model.parameters():
                             if p.grad is not None:
                                 p.grad.zero_()
-                        self.scaler = self._setup_scaler()
+                        old_scale = self.scaler.get_scale()
+                        self.scaler = self._setup_scaler(init_scale=old_scale * 0.5)
                         if not self._nan_lr_reduced:
                             for pg in self.optimizer.param_groups:
                                 old_lr = pg['lr']
@@ -769,9 +772,11 @@ class MultiHeadTrainer(BaseTrainer):
                             self._nan_lr_reduced = True
                         self.logger.logger.warning(
                             f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() failed with error: {e}')
-                    if not scaler_skipped:
+                    if not _batch_scaler_skipped:
                         self.scaler.update()
-                    self.ema.update(self.model)
+                        self.ema.update(self.model)
+                    else:
+                        scaler_skip_count += 1
             if first_batch:
                 t.cuda.synchronize()
                 t_backward = time.time()
@@ -819,8 +824,8 @@ class MultiHeadTrainer(BaseTrainer):
         self._last_train_digit_acc = digit_corrects * 100 / max(digit_total, 1)
         self._last_train_raw_joint_acc = raw_joint_corrects * 100 / max(joint_total, 1)
         self._last_epoch_avg_loss = total_loss / max(len(self.train_loader), 1)
-        if scaler_skipped:
-            self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: scaler.step() skipped at least once '
+        if scaler_skip_count > 0:
+            self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: scaler.step() skipped {scaler_skip_count} time(s) '
                                        f'(inf/nan gradients), model may not be learning')
         return self._last_train_joint_acc
 

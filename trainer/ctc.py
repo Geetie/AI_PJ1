@@ -309,9 +309,10 @@ class CTCTrainer(BaseTrainer):
             if (i + 1) % config.grad_accum_steps == 0 or (i + 1) == len(tbar):
                 self.scaler.unscale_(self.optimizer)
                 t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=config.grad_clip_max_norm)
-                self.scaler.step(self.optimizer)
+                step_result = self.scaler.step(self.optimizer)
                 self.scaler.update()
-                self.ema.update(self.model)
+                if step_result is not None:
+                    self.ema.update(self.model)
 
             total_loss += loss.item()
             batch_time = time.time() - batch_start

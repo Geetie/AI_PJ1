@@ -1351,9 +1351,10 @@ class Trainer:
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)
             t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
-            self.scaler.step(self.optimizer)
+            step_result = self.scaler.step(self.optimizer)
             self.scaler.update()
-            self.ema.update(self.model)
+            if step_result is not None:
+                self.ema.update(self.model)
             total_loss += loss.item()
 
             total += img.size(0)
@@ -2026,9 +2027,10 @@ class CTCTrainer:
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)
             t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
-            self.scaler.step(self.optimizer)
+            step_result = self.scaler.step(self.optimizer)
             self.scaler.update()
-            self.ema.update(self.model)
+            if step_result is not None:
+                self.ema.update(self.model)
             total_loss += loss.item()
 
             if i % config.train_eval_interval == 0:

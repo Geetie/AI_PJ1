@@ -471,8 +471,11 @@ class BaseTrainer:
             eta_min=config.scheduler_eta_min
         )
 
-    def _setup_scaler(self):
-        return GradScaler(self.device.type, enabled=self.use_amp)
+    def _setup_scaler(self, init_scale=None):
+        scaler = GradScaler(self.device.type, enabled=self.use_amp)
+        if init_scale is not None:
+            scaler._scale = t.tensor(init_scale, device=self.device.type)
+        return scaler
 
     def _pre_epoch_hook(self, epoch):
         pass
@@ -542,7 +545,7 @@ class BaseTrainer:
 
             current_lr = self.optimizer.param_groups[0]['lr']
 
-            if epoch == config.start_epoch or epoch % 10 == 0:
+            if epoch == config.start_epoch or epoch % 5 == 0:
                 raw = self._get_raw_model()
                 param_norm = sum(p.data.norm().item() ** 2 for p in raw.parameters()) ** 0.5
                 grad_norm = sum(p.grad.norm().item() ** 2 for p in raw.parameters() if p.grad is not None) ** 0.5 if epoch > config.start_epoch else 0.0
