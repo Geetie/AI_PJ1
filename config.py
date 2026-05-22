@@ -18,14 +18,13 @@ def print_env_info():
     print_platform_info()
 
 # ==================== 随机种子设置 ====================
-def set_seed(seed=42):
-    """设置全局随机种子以确保可复现性"""
+def set_seed(seed=42, deterministic=False):
     random.seed(seed)
     np.random.seed(seed)
     t.manual_seed(seed)
     t.cuda.manual_seed_all(seed)
-    t.backends.cudnn.benchmark = False
-    t.backends.cudnn.deterministic = True
+    t.backends.cudnn.benchmark = not deterministic
+    t.backends.cudnn.deterministic = deterministic
 
 
 # 初始化随机种子
@@ -204,8 +203,8 @@ def make_dataloader(dataset, batch_size, shuffle=False, drop_last=False,
         drop_last=drop_last,
     )
     if nw > 0:
-        kwargs['prefetch_factor'] = 2
-        kwargs['persistent_workers'] = False
+        kwargs['prefetch_factor'] = 4
+        kwargs['persistent_workers'] = True
     if collate_fn is not None:
         kwargs['collate_fn'] = collate_fn
     return DataLoader(dataset, **kwargs)

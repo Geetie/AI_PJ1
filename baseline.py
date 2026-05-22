@@ -256,8 +256,7 @@ class FPNBackbone(nn.Module):
     def _replace_relu_with_leaky(self, module, negative_slope=0.01):
         for name, child in module.named_children():
             if isinstance(child, nn.ReLU):
-                inplace = child.inplace
-                setattr(module, name, nn.LeakyReLU(negative_slope, inplace=inplace))
+                setattr(module, name, nn.LeakyReLU(negative_slope, inplace=child.inplace))
             else:
                 self._replace_relu_with_leaky(child, negative_slope)
 
@@ -285,10 +284,13 @@ class FPNBackbone(nn.Module):
         return c1, c2, c3
 
     def forward(self, x):
+        x = self.stem(x)
+        c1 = self.layer1(x)
+        c2 = self.layer2(c1)
         if self.training and self.use_checkpoint:
-            c1, c2, c3 = t.utils.checkpoint.checkpoint(self._forward_early, x, use_reentrant=False)
+            c3 = t.utils.checkpoint.checkpoint(self.layer3, c2, use_reentrant=True)
         else:
-            c1, c2, c3 = self._forward_early(x)
+            c3 = self.layer3(c2)
         c4 = self.layer4(c3)
         
         # Top-down pathway with bilinear interpolation (smoother than nearest)
@@ -1378,7 +1380,6 @@ class Trainer:
             with autocast('cuda', enabled=self.use_amp, dtype=t.bfloat16 if self.use_bf16 else t.float16):
                 pred, pred_bboxes, attn_maps, head_cls_outs, length_logits = self.model.forward_with_attn(img, gt_bboxes=bbox_target)
                 
-                # 动态掩码：根据bbox_mask计算每个样本的真实长度
                 true_lengths = bbox_mask.sum(dim=1).long()  # [B]
                 
                 # 分类损失：只对有效的head计算损失
@@ -1972,10 +1973,13 @@ class CTCModel(nn.Module):
         return c1, c2, c3
 
     def forward(self, x):
+        x = self.stem(x)
+        c1 = self.layer1(x)
+        c2 = self.layer2(c1)
         if self.training and self.use_checkpoint:
-            c1, c2, c3 = t.utils.checkpoint.checkpoint(self._forward_backbone, x, use_reentrant=False)
+            c3 = t.utils.checkpoint.checkpoint(self.layer3, c2, use_reentrant=True)
         else:
-            c1, c2, c3 = self._forward_backbone(x)
+            c3 = self.layer3(c2)
         c4 = self.layer4(c3)
         
         # Top-down pathway with bilinear interpolation

@@ -779,14 +779,22 @@ class MultiHeadTrainer(BaseTrainer):
                 
                 grad_norm_before_clip = 0.0
                 has_nan_grad = False
-                grad_total = 0
-                for p in self.model.parameters():
-                    if p.grad is not None:
-                        grad_total += 1
-                        grad_norm_before_clip += p.grad.norm().item() ** 2
-                        if t.isnan(p.grad).any() or t.isinf(p.grad).any():
-                            has_nan_grad = True
-                grad_norm_before_clip = grad_norm_before_clip ** 0.5 if grad_total > 0 else 0.0
+                need_grad_diag = (i % config.print_interval == 0) or (i + 1 == len(tbar))
+                if need_grad_diag:
+                    grad_total = 0
+                    for p in self.model.parameters():
+                        if p.grad is not None:
+                            grad_total += 1
+                            grad_norm_before_clip += p.grad.norm().item() ** 2
+                            if t.isnan(p.grad).any() or t.isinf(p.grad).any():
+                                has_nan_grad = True
+                    grad_norm_before_clip = grad_norm_before_clip ** 0.5 if grad_total > 0 else 0.0
+                else:
+                    for p in self.model.parameters():
+                        if p.grad is not None:
+                            if t.isnan(p.grad).any() or t.isinf(p.grad).any():
+                                has_nan_grad = True
+                                break
                 
                 if has_nan_grad:
                     self._nan_skip_count += 1
