@@ -78,6 +78,7 @@ class MultiHeadTrainer(BaseTrainer):
 
         self.model = create_model(self._model_type).to(self.device)
 
+        self._bn_protection = None
         raw_model_for_bn = self.model
         if hasattr(raw_model_for_bn, 'setup_bn_protection'):
             self._bn_protection = raw_model_for_bn.setup_bn_protection(
@@ -96,60 +97,18 @@ class MultiHeadTrainer(BaseTrainer):
         self._nan_lr_reduced = False
         
         self._loss_weight_history = []
-        self._bn_protection = None
+        self._grad_clip_max_norm = config.grad_clip_max_norm
+        self._last_train_joint_acc = 0.0
+        self._last_train_char_acc = 0.0
+        self._last_train_digit_acc = 0.0
+        self._last_train_raw_joint_acc = 0.0
+        self._last_epoch_avg_loss = float('inf')
+        self._last_val_joint_acc = 0.0
+        self._last_val_char_acc = 0.0
+        self._last_val_digit_acc = 0.0
+        self._last_val_raw_joint_acc = 0.0
 
-    def _compute_adaptive_loss_weights(self, epoch):
-        """计算自适应损失权重，平衡各损失项的梯度贡献
-
-        关键修复：根据诊断结果，Classification梯度是BBox的242倍，是Length的1854倍。
-        原有实现未考虑不同损失函数的固有梯度幅度差异，导致多任务学习失衡。
-        现使用保守的梯度补偿因子，在避免梯度爆炸的同时逐步平衡各任务的学习。
-        """
-        base_epoch = config.warmup_epochs
-
-        if not config.gradient_balance.get('enabled', True):
-            if epoch < base_epoch:
-                return {'cls': 1.0, 'bbox': 0.3, 'div': 0.5, 'ord': 0.3, 'attn': 0.3, 'aux': 0.5, 'length': 0.5}
-            progress = min((epoch - base_epoch) / (config.epoches - base_epoch), 1.0)
-            return {
-                'cls': 1.0,
-                'bbox': 0.3 + 0.7 * progress,
-                'div': 0.5 + 0.5 * progress,
-                'ord': 0.3 + 0.7 * progress,
-                'attn': 0.3 + 0.7 * progress,
-                'aux': 0.5 + 0.5 * progress,
-                'length': 0.5 + 2.5 * progress
-            }
-
-        bbox_compensation = config.gradient_balance.get('bbox_norm_factor', 50.0)
-        length_compensation = config.gradient_balance.get('length_norm_factor', 200.0)
-
-        if epoch < base_epoch:
-            warmup_factor = epoch / max(base_epoch, 1)
-            return {
-                'cls': 0.5 + 0.5 * warmup_factor,
-                'bbox': bbox_compensation * (0.3 + 0.2 * warmup_factor),
-                'div': 0.5,
-                'ord': bbox_compensation * (0.2 + 0.1 * warmup_factor),
-                'attn': bbox_compensation * (0.2 + 0.1 * warmup_factor),
-                'aux': 0.3 + 0.2 * warmup_factor,
-                'length': length_compensation * (0.2 + 0.1 * warmup_factor),
-            }
-
-        transition_epochs = 30
-        progress = min((epoch - base_epoch) / transition_epochs, 1.0)
-        cos_factor = 0.5 * (1 + t.cos(t.tensor(progress * t.pi)))
-
-        return {
-            'cls': 1.0,
-            'bbox': bbox_compensation * (0.3 + 0.7 * cos_factor),
-            'div': 0.5 + 0.5 * cos_factor,
-            'ord': bbox_compensation * (0.2 + 0.8 * cos_factor),
-            'attn': bbox_compensation * (0.2 + 0.8 * cos_factor),
-            'aux': 0.3 + 0.7 * cos_factor,
-            'length': length_compensation * (0.2 + 0.8 * cos_factor),
-        }
-
+        ckpt = None
         if config.pretrained is not None:
             ckpt = t.load(config.pretrained, map_location=self.device, weights_only=False)
             self._loaded_from_checkpoint = True
@@ -195,7 +154,7 @@ class MultiHeadTrainer(BaseTrainer):
             self.logger.logger.info(f'Load model from {config.pretrained}')
 
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
-        if config.pretrained is not None and not config.resume_weights_only:
+        if ckpt is not None and not config.resume_weights_only:
             if 'model' in ckpt:
                 try:
                     _, skipped = _load_state_dict_compat(self.ema.ema, ckpt['model'])
@@ -251,7 +210,7 @@ class MultiHeadTrainer(BaseTrainer):
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         self.logger.log_init(self._model_type, self.device, total_params, trainable_params)
 
-        if config.pretrained is not None:
+        if ckpt is not None:
             if 'best_acc' in ckpt:
                 self.best_acc = ckpt['best_acc']
             import re
@@ -329,9 +288,56 @@ class MultiHeadTrainer(BaseTrainer):
             self.val_loader = self._make_loader(self.val_set, batch_size=config.eval_batch_size,
                                                 shuffle=False, drop_last=False)
         else:
+            self.val_set = None
             self.val_loader = None
 
         self._diagnose_dataloader()
+
+    def _compute_adaptive_loss_weights(self, epoch):
+        base_epoch = config.warmup_epochs
+
+        if not config.gradient_balance.get('enabled', True):
+            if epoch < base_epoch:
+                return {'cls': 1.0, 'bbox': 0.3, 'div': 0.5, 'ord': 0.3, 'attn': 0.3, 'aux': 0.5, 'length': 0.5}
+            progress = min((epoch - base_epoch) / (config.epoches - base_epoch), 1.0)
+            return {
+                'cls': 1.0,
+                'bbox': 0.3 + 0.7 * progress,
+                'div': 0.5 + 0.5 * progress,
+                'ord': 0.3 + 0.7 * progress,
+                'attn': 0.3 + 0.7 * progress,
+                'aux': 0.5 + 0.5 * progress,
+                'length': 0.5 + 2.5 * progress
+            }
+
+        bbox_compensation = config.gradient_balance.get('bbox_norm_factor', 50.0)
+        length_compensation = config.gradient_balance.get('length_norm_factor', 200.0)
+
+        if epoch < base_epoch:
+            warmup_factor = epoch / max(base_epoch, 1)
+            return {
+                'cls': 0.5 + 0.5 * warmup_factor,
+                'bbox': bbox_compensation * (0.3 + 0.2 * warmup_factor),
+                'div': 0.5,
+                'ord': bbox_compensation * (0.2 + 0.1 * warmup_factor),
+                'attn': bbox_compensation * (0.2 + 0.1 * warmup_factor),
+                'aux': 0.3 + 0.2 * warmup_factor,
+                'length': length_compensation * (0.2 + 0.1 * warmup_factor),
+            }
+
+        transition_epochs = 30
+        progress = min((epoch - base_epoch) / transition_epochs, 1.0)
+        cos_factor = 0.5 * (1 + t.cos(t.tensor(progress * t.pi)))
+
+        return {
+            'cls': 1.0,
+            'bbox': bbox_compensation * (0.3 + 0.7 * cos_factor),
+            'div': 0.5 + 0.5 * cos_factor,
+            'ord': bbox_compensation * (0.2 + 0.8 * cos_factor),
+            'attn': bbox_compensation * (0.2 + 0.8 * cos_factor),
+            'aux': 0.3 + 0.7 * cos_factor,
+            'length': length_compensation * (0.2 + 0.8 * cos_factor),
+        }
 
     def _diagnose_dataloader(self):
         self.logger.logger.info('[DIAG] Dataset sizes: train=%d, val=%s',
@@ -563,8 +569,7 @@ class MultiHeadTrainer(BaseTrainer):
                     raw_model.set_roi_gt_prob(0.5 * (1 + math.cos(math.pi * progress)))
 
         self._cleanup_dataloader(self.train_loader)
-        # 使用与全局种子同步的生成器种子，确保数据加载顺序在每个epoch都不同
-        self._train_generator = make_epoch_generator(epoch_seed, epoch=epoch)
+        self._train_generator = make_epoch_generator(self._base_seed, epoch=epoch)
         self.train_loader = self._make_loader(self.train_set, batch_size=config.batch_size,
                                               shuffle=True, drop_last=True,
                                               generator=self._train_generator,

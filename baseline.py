@@ -198,6 +198,7 @@ class FPNBackbone(nn.Module):
     def __init__(self):
         super().__init__()
         backbone = resnet101(weights=ResNet101_Weights.IMAGENET1K_V1, replace_stride_with_dilation=[False, False, True])
+        self._replace_relu_with_leaky(backbone)
         self.stem = nn.Sequential(backbone.conv1, backbone.bn1, backbone.relu, backbone.maxpool)
         self.layer1 = backbone.layer1
         self.layer2 = backbone.layer2
@@ -251,6 +252,14 @@ class FPNBackbone(nn.Module):
         self.se = SEBlock(config.multiscale_feat_dim)
         self.use_checkpoint = True
         self._reset_batch_norm_stats()
+
+    def _replace_relu_with_leaky(self, module, negative_slope=0.01):
+        for name, child in module.named_children():
+            if isinstance(child, nn.ReLU):
+                inplace = child.inplace
+                setattr(module, name, nn.LeakyReLU(negative_slope, inplace=inplace))
+            else:
+                self._replace_relu_with_leaky(child, negative_slope)
 
     def _reset_batch_norm_stats(self):
         fpn_prefixes = (
@@ -724,6 +733,7 @@ class DigitsResnet101(nn.Module):
             nn.Dropout(config.dropout),
             nn.Linear(64, num_heads + 1),
         )
+        self._bn_protection = None
 
     def _extract_roi_feat(self, feat, bbox_pred, head_idx):
         """
@@ -791,6 +801,14 @@ class DigitsResnet101(nn.Module):
 
     def set_roi_gt_prob(self, prob):
         self.roi_gt_prob = prob
+
+    def setup_bn_protection(self, warmup_epochs=10, freeze_epochs=0,
+                            bn_grad_max_norm=1.0, auto_fix=True):
+        from utils.bn_protection import install_bn_protection
+        self._bn_protection = install_bn_protection(
+            self, warmup_epochs=warmup_epochs, freeze_epochs=freeze_epochs,
+            bn_grad_max_norm=bn_grad_max_norm, auto_fix=auto_fix)
+        return self._bn_protection
 
     def forward(self, img, gt_bboxes=None):
         feat = self.backbone(img)
@@ -872,6 +890,15 @@ class TransformerDigitsModel(nn.Module):
             nn.Linear(feat_dim // 4, 4),
             nn.Sigmoid()
         )
+        self._bn_protection = None
+
+    def setup_bn_protection(self, warmup_epochs=10, freeze_epochs=0,
+                            bn_grad_max_norm=1.0, auto_fix=True):
+        from utils.bn_protection import install_bn_protection
+        self._bn_protection = install_bn_protection(
+            self, warmup_epochs=warmup_epochs, freeze_epochs=freeze_epochs,
+            bn_grad_max_norm=bn_grad_max_norm, auto_fix=auto_fix)
+        return self._bn_protection
 
     def _prepare_memory(self, feat):
         B, C, H, W = feat.shape
@@ -1119,10 +1146,22 @@ class Trainer:
                                          persistent_workers=NUM_WORKERS > 0,
                                          prefetch_factor=2)
         else:
+            self.val_set = None
             self.val_loader = None
 
         self.model = create_model(self.model_type).to(self.device)
         self.ema = ModelEMA(self.model, decay=config.ema_decay)
+
+        self._bn_protection = None
+        raw_model_for_bn = self.model
+        if hasattr(raw_model_for_bn, 'setup_bn_protection'):
+            self._bn_protection = raw_model_for_bn.setup_bn_protection(
+                warmup_epochs=config.warmup_epochs,
+                freeze_epochs=0,
+                bn_grad_max_norm=1.0,
+                auto_fix=True,
+            )
+            print('[BN-PROT] BN protection installed: grad_clip=1.0, warmup=%d epochs' % config.warmup_epochs)
         if config.use_torch_compile and t.cuda.is_available():
             self.model = t.compile(self.model, mode="reduce-overhead")
             print('✅ torch.compile enabled')
@@ -1192,14 +1231,19 @@ class Trainer:
             gc.collect()
     
     def _pre_epoch_hook(self, epoch):
-        # 使用统一的种子设置函数，确保全局种子和数据加载器种子同步
         epoch_seed = self._base_seed + epoch * 1000
         random.seed(epoch_seed)
         np.random.seed(epoch_seed)
         t.manual_seed(epoch_seed)
         if t.cuda.is_available():
             t.cuda.manual_seed_all(epoch_seed)
-        
+
+        if self._bn_protection is not None:
+            momentum = self._bn_protection['momentum_scheduler'].step(epoch, config.epoches)
+            self._bn_protection['safe_wrapper'].step(epoch)
+            if epoch < 3 or epoch % 10 == 0:
+                print('[BN-PROT] epoch=%d momentum=%.4f' % (epoch + 1, momentum))
+
         if hasattr(self.model, 'set_roi_gt_prob'):
             import math
             if epoch < config.warmup_epochs:
@@ -1403,6 +1447,8 @@ class Trainer:
 
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)
+            if self._bn_protection is not None:
+                self._bn_protection['grad_cliper'].clip(self.model)
             t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
             step_result = self.scaler.step(self.optimizer)
             self.scaler.update()

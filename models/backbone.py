@@ -56,6 +56,7 @@ class FPNBackbone(nn.Module):
         
         backbone = resnet101(weights=ResNet101_Weights.IMAGENET1K_V1, 
                             replace_stride_with_dilation=[False, False, True])
+        self._replace_relu_with_leaky(backbone)
         self.stem = nn.Sequential(backbone.conv1, backbone.bn1, backbone.relu, backbone.maxpool)
         self.layer1 = backbone.layer1
         self.layer2 = backbone.layer2
@@ -114,6 +115,14 @@ class FPNBackbone(nn.Module):
         self.use_checkpoint = True
         self._init_weights()
         self._reset_batch_norm_stats()
+
+    def _replace_relu_with_leaky(self, module, negative_slope=0.01):
+        for name, child in module.named_children():
+            if isinstance(child, nn.ReLU):
+                inplace = child.inplace
+                setattr(module, name, nn.LeakyReLU(negative_slope, inplace=inplace))
+            else:
+                self._replace_relu_with_leaky(child, negative_slope)
 
     def _reset_batch_norm_stats(self):
         fpn_prefixes = (

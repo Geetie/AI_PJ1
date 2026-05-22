@@ -18,7 +18,8 @@ def make_epoch_generator(base_seed=42, epoch=0):
     """创建指定epoch的随机数生成器
     
     确保每个epoch使用唯一的种子，保证数据加载顺序的随机性。
-    种子计算公式: base_seed + epoch，确保不同epoch的生成器产生不同的随机序列。
+    种子计算公式与 set_epoch_seed 一致: base_seed + epoch * 1000，
+    确保DataLoader生成器种子与全局种子同步。
     
     Args:
         base_seed: 基础种子值
@@ -28,8 +29,7 @@ def make_epoch_generator(base_seed=42, epoch=0):
         torch.Generator: 配置好种子的随机数生成器
     """
     generator = t.Generator()
-    # 使用epoch作为偏移，确保每个epoch都有不同的随机序列
-    generator.manual_seed(base_seed + epoch)
+    generator.manual_seed(base_seed + epoch * 1000)
     return generator
 
 
