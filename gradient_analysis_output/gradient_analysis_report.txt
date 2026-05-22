@@ -1,0 +1,334 @@
+============================================================
+Street Character Recognition - Systematic Gradient Analysis
+Timestamp: 2026-05-22 19:44:58
+Output directory: D:\HuaweiMoveData\Users\官海峰\Desktop\2026春\人工智能\Project1-街景字符识别\Street_Character_Recognition\gradient_analysis_output
+============================================================
+
+[INFO] Using device: cpu
+[INFO] Creating model...
+[INFO] Total params: 107,115,398
+[INFO] Trainable params: 107,115,398
+[INFO] Using dummy test data with batch_size=2...
+
+============================================================
+1. Gradient Distribution Analysis
+============================================================
+
+  [BN] Layer count: 208
+    Min norm: 1.3385e-03
+    Max norm: 1.5827e+03
+    Mean norm: 1.1008e+02
+    ⚠️  BN layers with large gradient (>10): 96
+      backbone.layer1.0.bn1.weight: 1.5827e+03
+      backbone.layer1.0.bn1.bias: 1.1818e+03
+      backbone.layer1.0.bn2.weight: 1.1264e+03
+      backbone.layer1.0.bn3.weight: 1.1119e+03
+      backbone.layer1.0.bn2.bias: 1.0280e+03
+
+  [Conv] Layer count: 135
+    Min norm: 7.7487e-08
+    Max norm: 2.4630e+04
+    Mean norm: 1.4818e+03
+
+  [Linear] Layer count: 24
+    Min norm: 0.0000e+00
+    Max norm: 8.2891e+00
+    Mean norm: 2.3082e+00
+
+  [Embedding] Layer count: 6
+    Min norm: 0.0000e+00
+    Max norm: 7.2901e+00
+    Mean norm: 3.5955e+00
+
+  [Other] Layer count: 114
+    Min norm: 0.0000e+00
+    Max norm: 1.3983e+05
+    Mean norm: 1.4823e+03
+
+  Overall Gradient Summary:
+    Total params with grad: 487
+    NaN gradients: 0
+    Inf gradients: 0
+    Near-zero gradients (<1e-7): 10
+
+============================================================
+2. Gradient Propagation Path Analysis
+============================================================
+
+  [Backbone ResNet Layers] Gradient Norms (last 5):
+    backbone.layer4.2.bn3.bias: 1.0111e+00
+    backbone.layer4.2.bn3.weight: 1.7064e+00
+    backbone.layer4.2.conv1.weight: 4.5758e+01
+    backbone.layer4.2.conv2.weight: 1.1535e+02
+    backbone.layer4.2.conv3.weight: 6.3865e+01
+    Backbone avg: 8.6640e+02
+
+  [FPN Layers] Gradient Norms:
+    backbone.fuse.0.weight: 1.2801e+02
+    backbone.fuse.1.bias: 1.9467e+00
+    backbone.fuse.1.weight: 2.3822e+00
+    backbone.l1_reduce.0.weight: 7.5578e+00
+    backbone.l1_reduce.1.bias: 6.3675e-01
+    backbone.l1_reduce.1.weight: 7.6621e-01
+    backbone.l2_reduce.0.weight: 1.9927e+01
+    backbone.l2_reduce.1.bias: 1.3028e+00
+    backbone.l2_reduce.1.weight: 1.4068e+00
+    backbone.l2_to_p1.0.weight: 9.3794e+00
+    backbone.l2_to_p1.1.bias: 7.2088e-01
+    backbone.l2_to_p1.1.weight: 9.1330e-01
+    backbone.l3_reduce.0.weight: 2.3207e+01
+    backbone.l3_reduce.1.bias: 1.4386e+00
+    backbone.l3_reduce.1.weight: 1.6083e+00
+    backbone.l4_reduce.0.weight: 3.0712e+01
+    backbone.l4_reduce.1.bias: 1.8289e+00
+    backbone.l4_reduce.1.weight: 2.1769e+00
+    backbone.se.fc.0.weight: 3.1563e+00
+    backbone.se.fc.2.weight: 1.4499e+00
+    backbone.smooth_p1.0.weight: 2.9851e+01
+    backbone.smooth_p1.1.bias: 8.7614e-01
+    backbone.smooth_p1.1.weight: 9.8672e-01
+    backbone.smooth_p2.0.weight: 7.0499e+01
+    backbone.smooth_p2.1.bias: 1.4067e+00
+    backbone.smooth_p2.1.weight: 1.8154e+00
+    backbone.smooth_p3.0.weight: 8.4207e+01
+    backbone.smooth_p3.1.bias: 1.8548e+00
+    backbone.smooth_p3.1.weight: 2.1466e+00
+    backbone.stem.0.weight: 1.5341e+05
+    backbone.stem.1.bias: 1.6846e+02
+    backbone.stem.1.weight: 2.1901e+03
+
+  [Head Interaction + Classification] Gradient Norms:
+    head_fc.0.bias: 2.2489e-01
+    head_fc.0.weight: 7.6726e+00
+    head_fc.1.bias: 2.7053e-01
+    head_fc.1.weight: 8.5549e+00
+    head_fc.2.bias: 2.6293e-01
+    head_fc.2.weight: 8.4492e+00
+    head_interaction.ffn.0.bias: 1.4448e-01
+    head_interaction.ffn.0.weight: 4.6483e+00
+    head_interaction.ffn.3.bias: 3.0772e-01
+    head_interaction.ffn.3.weight: 9.0102e+00
+    head_interaction.learnable_pos: 7.4766e+00
+    head_interaction.norm1.bias: 2.5578e-01
+    head_interaction.norm1.weight: 2.5842e-01
+    head_interaction.norm2.bias: 2.5583e-01
+    head_interaction.norm2.weight: 2.5999e-01
+    head_interaction.self_attn.in_proj_bias: 4.0323e+00
+    head_interaction.self_attn.in_proj_weight: 4.6128e+00
+    head_interaction.self_attn.out_proj.bias: 7.2252e+00
+    head_interaction.self_attn.out_proj.weight: 5.5616e+00
+
+  [Classification-specific layers] Gradient Norms:
+    heads.0.cls_layer.weight: 1.5638e-01
+    heads.0.cls_layer.bias: 2.2489e-01
+    heads.1.cls_layer.weight: 1.7310e-01
+    heads.1.cls_layer.bias: 2.7053e-01
+    heads.2.cls_layer.weight: 1.6708e-01
+    heads.2.cls_layer.bias: 2.6293e-01
+    roi_cls_heads.0.weight: 3.7096e+00
+    roi_cls_heads.0.bias: 2.2489e-01
+    roi_cls_heads.1.weight: 3.6978e+00
+    roi_cls_heads.1.bias: 2.7053e-01
+    roi_cls_heads.2.weight: 3.7472e+00
+    roi_cls_heads.2.bias: 2.6293e-01
+    head_fc.0.weight: 7.6726e+00
+    head_fc.0.bias: 2.2489e-01
+    head_fc.1.weight: 8.5549e+00
+    head_fc.1.bias: 2.7053e-01
+    head_fc.2.weight: 8.4492e+00
+    head_fc.2.bias: 2.6293e-01
+
+  Gradient ratio (interaction/backbone): 0.00x
+
+============================================================
+3. BN Layer Gradient Amplification Analysis
+============================================================
+
+  BN Layer Input/Output Statistics:
+    ⚠️  backbone.layer1.1.bn2: mean=7.6382, std=1.1699e+01, range=[0.0000, 105.8136]
+    ⚠️  backbone.layer1.1.bn3: mean=18.2874, std=2.5101e+01, range=[0.0000, 196.1001]
+    ⚠️  backbone.layer1.2.bn1: mean=21.2858, std=3.0615e+01, range=[0.0000, 218.3897]
+    ⚠️  backbone.layer1.2.bn2: mean=39.4917, std=5.6321e+01, range=[0.0000, 396.0264]
+    ⚠️  backbone.layer1.2.bn3: mean=89.7652, std=1.2199e+02, range=[0.0000, 894.3161]
+    ⚠️  backbone.layer2.0.bn1: mean=88.7937, std=1.3325e+02, range=[0.0000, 990.7961]
+    ⚠️  backbone.layer2.0.bn2: mean=204.3566, std=2.7091e+02, range=[0.0000, 1817.9866]
+    ⚠️  backbone.layer2.0.bn3: mean=370.9869, std=5.5135e+02, range=[0.0000, 4260.0459]
+    ⚠️  backbone.layer2.0.downsample.1: mean=5.4627, std=2.1617e+02, range=[-1052.5663, 978.1347]
+    ⚠️  backbone.layer2.1.bn1: mean=647.7927, std=8.7772e+02, range=[0.0000, 5797.1450]
+    ⚠️  backbone.layer2.1.bn2: mean=977.0077, std=1.5320e+03, range=[0.0000, 11059.8486]
+    ⚠️  backbone.layer2.1.bn3: mean=2273.4841, std=3.1036e+03, range=[0.0000, 23132.1406]
+    ⚠️  backbone.layer2.2.bn1: mean=3115.8950, std=3.8939e+03, range=[0.0000, 23172.7520]
+    ⚠️  backbone.layer2.2.bn2: mean=6272.9951, std=9.0378e+03, range=[0.0000, 70994.6484]
+    ⚠️  backbone.layer2.2.bn3: mean=14410.7920, std=1.9168e+04, range=[0.0000, 132653.8438]
+    ⚠️  backbone.layer2.3.bn1: mean=13016.8447, std=1.9828e+04, range=[0.0000, 126576.9688]
+    ⚠️  backbone.layer2.3.bn2: mean=23830.9277, std=3.9494e+04, range=[0.0000, 310834.9688]
+    ⚠️  backbone.layer2.3.bn3: mean=63794.5625, std=8.4372e+04, range=[0.0000, 531305.9375]
+    ⚠️  backbone.layer3.0.bn1: mean=48222.4023, std=6.8558e+04, range=[0.0000, 415184.5625]
+    ⚠️  backbone.layer3.0.bn2: mean=96607.2656, std=1.4141e+05, range=[0.0000, 861754.5625]
+    ⚠️  backbone.layer3.0.bn3: mean=191399.1875, std=2.8476e+05, range=[0.0000, 1846727.6250]
+    ⚠️  backbone.layer3.0.downsample.1: mean=-3948.7869, std=1.3778e+05, range=[-530967.3750, 616927.4375]
+    ⚠️  backbone.layer3.1.bn1: mean=333968.7188, std=4.7634e+05, range=[0.0000, 3053504.5000]
+    ⚠️  backbone.layer3.1.bn2: mean=592303.8750, std=9.7226e+05, range=[0.0000, 5716311.5000]
+    ⚠️  backbone.layer3.1.bn3: mean=1431105.5000, std=2.0583e+06, range=[0.0000, 14100363.0000]
+    ⚠️  backbone.layer3.2.bn1: mean=1701719.7500, std=2.5597e+06, range=[0.0000, 16629104.0000]
+    ⚠️  backbone.layer3.2.bn2: mean=3607875.0000, std=5.4152e+06, range=[0.0000, 34393992.0000]
+    ⚠️  backbone.layer3.2.bn3: mean=8066102.0000, std=1.1641e+07, range=[0.0000, 78336552.0000]
+    ⚠️  backbone.layer3.3.bn1: mean=7957684.5000, std=1.2620e+07, range=[0.0000, 78011912.0000]
+    ⚠️  backbone.layer3.3.bn2: mean=17666634.0000, std=2.6822e+07, range=[0.0000, 151090864.0000]
+    ⚠️  backbone.layer3.3.bn3: mean=43856880.0000, std=5.9423e+07, range=[0.0000, 332055424.0000]
+    ⚠️  backbone.layer3.4.bn1: mean=42758236.0000, std=6.0145e+07, range=[0.0000, 316660096.0000]
+    ⚠️  backbone.layer3.4.bn2: mean=84876992.0000, std=1.2625e+08, range=[0.0000, 618937664.0000]
+    ⚠️  backbone.layer3.4.bn3: mean=204486160.0000, std=2.7969e+08, range=[0.0000, 1825469184.0000]
+    ⚠️  backbone.layer3.5.bn1: mean=171048336.0000, std=2.5378e+08, range=[0.0000, 1506732160.0000]
+    ⚠️  backbone.layer3.5.bn2: mean=303096320.0000, std=4.6036e+08, range=[0.0000, 2883261952.0000]
+    ⚠️  backbone.layer3.5.bn3: mean=807476480.0000, std=1.0469e+09, range=[0.0000, 6604504576.0000]
+    ⚠️  backbone.layer3.6.bn1: mean=620226304.0000, std=8.7134e+08, range=[0.0000, 5760457216.0000]
+    ⚠️  backbone.layer3.6.bn2: mean=1084905600.0000, std=1.6933e+09, range=[0.0000, 10208755712.0000]
+    ⚠️  backbone.layer3.6.bn3: mean=2783876608.0000, std=3.7130e+09, range=[0.0000, 24161486848.0000]
+    ⚠️  backbone.layer3.7.bn1: mean=1769942144.0000, std=2.6178e+09, range=[0.0000, 16141787136.0000]
+    ⚠️  backbone.layer3.7.bn2: mean=3334218496.0000, std=5.2313e+09, range=[0.0000, 30348513280.0000]
+    ⚠️  backbone.layer3.7.bn3: mean=8879195136.0000, std=1.1714e+10, range=[0.0000, 70621249536.0000]
+    ⚠️  backbone.layer3.8.bn1: mean=5870628352.0000, std=8.6716e+09, range=[0.0000, 48873988096.0000]
+    ⚠️  backbone.layer3.8.bn2: mean=10498185216.0000, std=1.6719e+10, range=[0.0000, 91148771328.0000]
+    ⚠️  backbone.layer3.8.bn3: mean=29128177664.0000, std=3.8389e+10, range=[0.0000, 244073070592.0000]
+    ⚠️  backbone.layer3.9.bn1: mean=13226294272.0000, std=2.0641e+10, range=[0.0000, 111864102912.0000]
+    ⚠️  backbone.layer3.9.bn2: mean=30010327040.0000, std=4.1274e+10, range=[0.0000, 256552402944.0000]
+    ⚠️  backbone.layer3.9.bn3: mean=70317449216.0000, std=9.9693e+10, range=[0.0000, 646296698880.0000]
+    ⚠️  backbone.layer3.10.bn1: mean=41438687232.0000, std=6.0504e+10, range=[0.0000, 355070443520.0000]
+    ⚠️  backbone.layer3.10.bn2: mean=92469723136.0000, std=1.3600e+11, range=[0.0000, 828574597120.0000]
+    ⚠️  backbone.layer3.10.bn3: mean=238924513280.0000, std=3.2475e+11, range=[0.0000, 2075886223360.0000]
+    ⚠️  backbone.layer3.11.bn1: mean=114573492224.0000, std=1.8476e+11, range=[0.0000, 1166153482240.0000]
+    ⚠️  backbone.layer3.11.bn2: mean=260717182976.0000, std=3.7584e+11, range=[0.0000, 2044997533696.0000]
+    ⚠️  backbone.layer3.11.bn3: mean=680657616896.0000, std=8.7370e+11, range=[0.0000, 4865488060416.0000]
+    ⚠️  backbone.layer3.12.bn1: mean=251710144512.0000, std=4.4922e+11, range=[0.0000, 2865980768256.0000]
+    ⚠️  backbone.layer3.12.bn2: mean=616840298496.0000, std=8.9959e+11, range=[0.0000, 4905283616768.0000]
+    ⚠️  backbone.layer3.12.bn3: mean=1654978248704.0000, std=2.2365e+12, range=[0.0000, 13841880580096.0000]
+    ⚠️  backbone.layer3.13.bn1: mean=818346196992.0000, std=1.1972e+12, range=[0.0000, 7320295178240.0000]
+    ⚠️  backbone.layer3.13.bn2: mean=1531792326656.0000, std=2.3268e+12, range=[0.0000, 14391950966784.0000]
+    ⚠️  backbone.layer3.13.bn3: mean=4476204220416.0000, std=5.7199e+12, range=[0.0000, 35105068285952.0000]
+    ⚠️  backbone.layer3.14.bn1: mean=2189201113088.0000, std=3.1298e+12, range=[0.0000, 19639130128384.0000]
+    ⚠️  backbone.layer3.14.bn2: mean=4343334174720.0000, std=6.5160e+12, range=[0.0000, 45097517318144.0000]
+    ⚠️  backbone.layer3.14.bn3: mean=11389218324480.0000, std=1.4742e+13, range=[0.0000, 92093955440640.0000]
+    ⚠️  backbone.layer3.15.bn1: mean=5155584475136.0000, std=7.8543e+12, range=[0.0000, 51916763561984.0000]
+    ⚠️  backbone.layer3.15.bn2: mean=9500879749120.0000, std=1.4613e+13, range=[0.0000, 105533965074432.0000]
+    ⚠️  backbone.layer3.15.bn3: mean=25654017916928.0000, std=3.4934e+13, range=[0.0000, 257046041591808.0000]
+    ⚠️  backbone.layer3.16.bn1: mean=10259111346176.0000, std=1.6756e+13, range=[0.0000, 105804212469760.0000]
+    ⚠️  backbone.layer3.16.bn2: mean=21349653282816.0000, std=3.2771e+13, range=[0.0000, 211690381639680.0000]
+    ⚠️  backbone.layer3.16.bn3: mean=61083964407808.0000, std=8.2101e+13, range=[0.0000, 501335728324608.0000]
+    ⚠️  backbone.layer3.17.bn1: mean=24460188975104.0000, std=3.6340e+13, range=[0.0000, 203625674571776.0000]
+    ⚠️  backbone.layer3.17.bn2: mean=45769008611328.0000, std=7.0130e+13, range=[0.0000, 437830610321408.0000]
+    ⚠️  backbone.layer3.17.bn3: mean=135834883850240.0000, std=1.7664e+14, range=[0.0000, 1182747557101568.0000]
+    ⚠️  backbone.layer3.18.bn1: mean=57969240702976.0000, std=8.8567e+13, range=[0.0000, 756710155223040.0000]
+    ⚠️  backbone.layer3.18.bn2: mean=120300448514048.0000, std=1.8152e+14, range=[0.0000, 1271968254918656.0000]
+    ⚠️  backbone.layer3.18.bn3: mean=320352047595520.0000, std=4.3193e+14, range=[0.0000, 2830588801187840.0000]
+    ⚠️  backbone.layer3.19.bn1: mean=126474497556480.0000, std=1.9533e+14, range=[0.0000, 1103107119382528.0000]
+    ⚠️  backbone.layer3.19.bn2: mean=243706762362880.0000, std=3.7368e+14, range=[0.0000, 2390091855036416.0000]
+    ⚠️  backbone.layer3.19.bn3: mean=726287895232512.0000, std=8.9598e+14, range=[0.0000, 6417805347913728.0000]
+    ⚠️  backbone.layer3.20.bn1: mean=287927024222208.0000, std=4.2667e+14, range=[0.0000, 2461350999621632.0000]
+    ⚠️  backbone.layer3.20.bn2: mean=521254410911744.0000, std=8.0496e+14, range=[0.0000, 4890254058192896.0000]
+    ⚠️  backbone.layer3.20.bn3: mean=1533657659473920.0000, std=2.0262e+15, range=[0.0000, 12846965515616256.0000]
+    ⚠️  backbone.layer3.21.bn1: mean=602533647089664.0000, std=9.2553e+14, range=[0.0000, 5406535433846784.0000]
+    ⚠️  backbone.layer3.21.bn2: mean=1258668754468864.0000, std=1.8544e+15, range=[0.0000, 10920867030630400.0000]
+    ⚠️  backbone.layer3.21.bn3: mean=3477024328908800.0000, std=4.5413e+15, range=[0.0000, 30263043942252544.0000]
+    ⚠️  backbone.layer3.22.bn1: mean=1498380408717312.0000, std=2.1209e+15, range=[0.0000, 12216435325534208.0000]
+    ⚠️  backbone.layer3.22.bn2: mean=2579179937726464.0000, std=4.0320e+15, range=[0.0000, 24824788564312064.0000]
+    ⚠️  backbone.layer3.22.bn3: mean=7253334327033856.0000, std=9.8665e+15, range=[0.0000, 66976076496109568.0000]
+    ⚠️  backbone.layer4.0.bn1: mean=3720664938708992.0000, std=5.5568e+15, range=[0.0000, 36561377258635264.0000]
+    ⚠️  backbone.layer4.0.bn2: mean=9198439116046336.0000, std=1.4270e+16, range=[0.0000, 89679037399564288.0000]
+    ⚠️  backbone.layer4.0.bn3: mean=25177190630948864.0000, std=3.9263e+16, range=[0.0000, 278587367118340096.0000]
+    ⚠️  backbone.layer4.0.downsample.1: mean=-374794583277568.0000, std=9.6596e+15, range=[-39731836217196544.0000, 44099740647817216.0000]
+    ⚠️  backbone.layer4.1.bn1: mean=44067854810611712.0000, std=6.6815e+16, range=[0.0000, 483714610038308864.0000]
+    ⚠️  backbone.layer4.1.bn2: mean=110934160532570112.0000, std=1.7827e+17, range=[0.0000, 1221435372668452864.0000]
+    ⚠️  backbone.layer4.1.bn3: mean=328829396330741760.0000, std=5.0223e+17, range=[0.0000, 3925677624113758208.0000]
+    ⚠️  backbone.layer4.2.bn1: mean=468750462942707712.0000, std=7.4281e+17, range=[0.0000, 5653459541849800704.0000]
+    ⚠️  backbone.layer4.2.bn2: mean=1329879379882278912.0000, std=2.0022e+18, range=[0.0000, 13349339997619093504.0000]
+    ⚠️  backbone.layer4.2.bn3: mean=3604618579535724544.0000, std=5.4355e+18, range=[0.0000, 37682000712255406080.0000]
+    ⚠️  backbone.l4_reduce.1: mean=5842333649269161984.0000, std=7.9286e+18, range=[0.0000, 54980102580613414912.0000]
+    ⚠️  backbone.l3_reduce.1: mean=3472650710024192.0000, std=5.3929e+15, range=[0.0000, 31314335972196352.0000]
+    ⚠️  backbone.smooth_p3.1: mean=4254088278313009152.0000, std=6.6274e+18, range=[0.0000, 43022460629758771200.0000]
+    ⚠️  backbone.l2_reduce.1: mean=63521.1055, std=9.0486e+04, range=[0.0000, 562261.3125]
+    ⚠️  backbone.smooth_p2.1: mean=4750601616015491072.0000, std=6.8865e+18, range=[0.0000, 50555135626814947328.0000]
+    ⚠️  backbone.l1_reduce.1: mean=91.0064, std=1.2742e+02, range=[0.0000, 898.8121]
+    ⚠️  backbone.l2_to_p1.1: mean=6204861324644581376.0000, std=9.2342e+18, range=[0.0000, 61201825465825755136.0000]
+    ⚠️  backbone.smooth_p1.1: mean=5785365752810831872.0000, std=8.6687e+18, range=[0.0000, 53288820600628838400.0000]
+    ⚠️  backbone.fuse.1: mean=6775628255983566848.0000, std=1.0412e+19, range=[0.0000, 76221418184036581376.0000]
+    ⚠️  pre_head_comm.comm_conv.1: mean=5127502657145012224.0000, std=7.9559e+18, range=[0.0000, 50765749278138695680.0000]
+    ⚠️  heads.0.norm_input: mean=7429682093614956544.0000, std=1.1233e+19, range=[-0.4814, 82430281181250453504.0000]
+    ⚠️  heads.0.attention_conv.1: mean=193237003918114816.0000, std=6.1924e+17, range=[0.0000, 9194206941172203520.0000]
+    ⚠️  heads.0.attention_conv.4: mean=516464629023506432.0000, std=8.2300e+17, range=[0.0000, 5957106720290373632.0000]
+    ⚠️  heads.0.attention_conv.7: mean=705397938272075776.0000, std=1.1481e+18, range=[0.0000, 8818662147635544064.0000]
+    ⚠️  heads.1.norm_input: mean=7429682093614956544.0000, std=1.1233e+19, range=[-0.4169, 82430281181250453504.0000]
+    ⚠️  heads.1.attention_conv.1: mean=190506727567785984.0000, std=5.5521e+17, range=[0.0000, 5567529409604222976.0000]
+    ⚠️  heads.1.attention_conv.4: mean=519363731948306432.0000, std=8.1189e+17, range=[0.0000, 5744683272827305984.0000]
+    ⚠️  heads.1.attention_conv.7: mean=676461403569127424.0000, std=9.3129e+17, range=[0.0000, 4773993176140611584.0000]
+    ⚠️  heads.2.norm_input: mean=8543603920784588800.0000, std=1.2913e+19, range=[-0.5976, 94798669889916633088.0000]
+    ⚠️  heads.2.attention_conv.1: mean=250245668206018560.0000, std=7.4469e+17, range=[0.0000, 12746594320342056960.0000]
+    ⚠️  heads.2.attention_conv.4: mean=556369685566717952.0000, std=8.8684e+17, range=[0.0000, 5518195422377541632.0000]
+    ⚠️  heads.2.attention_conv.7: mean=728201465834766336.0000, std=1.1288e+18, range=[0.0000, 6194737571331833856.0000]
+    ⚠️  roi_cnn.0.1: mean=6012715620376772608.0000, std=8.6324e+18, range=[0.0000, 44563360205389168640.0000]
+    ⚠️  roi_cnn.0.4: mean=5798542300158099456.0000, std=8.3059e+18, range=[0.0000, 52870764289515847680.0000]
+    ⚠️  roi_cnn.1.1: mean=3049200005886771200.0000, std=4.9070e+18, range=[0.0000, 33485745371173879808.0000]
+    ⚠️  roi_cnn.1.4: mean=2942725223998291968.0000, std=5.1575e+18, range=[0.0000, 41680159242383785984.0000]
+    ⚠️  roi_cnn.2.1: mean=4617610187077844992.0000, std=7.2062e+18, range=[0.0000, 70834488507096891392.0000]
+    ⚠️  roi_cnn.2.4: mean=4287419698431131648.0000, std=7.2257e+18, range=[0.0000, 66348111629863878656.0000]
+
+    Total BN layers with abnormal activations: 126
+
+  BN Parameter Gradient Analysis:
+    BN weight grad norms: min=2.2005e-03, max=1.0605e+03, avg=1.0253e+02
+    ⚠️  BN weights with large gradient (>10): 47
+      backbone.layer1.0.bn1.weight: 1.0605e+03
+      backbone.layer1.0.bn2.weight: 9.8669e+02
+      backbone.layer1.0.bn3.weight: 9.6057e+02
+      backbone.layer1.1.bn1.weight: 8.8476e+02
+      backbone.layer1.1.bn2.weight: 7.1631e+02
+    BN bias grad norms: min=1.9858e-02, max=1.0165e+03, avg=8.6358e+01
+
+============================================================
+4. Classification Layer Gradient Path Analysis
+============================================================
+
+  Main Classification Path Gradient Flow:
+    head_fc: avg=4.3438e+00, max=9.2375e+00, params=6
+    head_interaction: avg=3.7815e+00, max=9.3884e+00, params=13
+    heads.0.feat_proj: avg=2.7921e+00, max=6.5021e+00, params=4
+    heads.1.feat_proj: avg=2.2195e+00, max=5.1705e+00, params=4
+    heads.2.feat_proj: avg=2.2344e+00, max=5.2015e+00, params=4
+    heads.0.cls_layer: avg=2.3609e-01, max=2.9613e-01, params=2
+    heads.1.cls_layer: avg=2.1282e-01, max=2.5561e-01, params=2
+    heads.2.cls_layer: avg=1.9258e-01, max=2.4043e-01, params=2
+    heads.0.attention_conv: avg=4.7360e+00, max=3.4493e+01, params=11
+    heads.1.attention_conv: avg=2.7008e+00, max=1.9594e+01, params=11
+    heads.2.attention_conv: avg=4.2587e+00, max=3.1179e+01, params=11
+    pre_head_comm: avg=9.7846e+00, max=4.4079e+01, params=6
+    backbone.fuse: avg=4.8864e+01, max=1.4194e+02, params=3
+    backbone.se: avg=2.8117e+00, max=4.0088e+00, params=2
+
+  Gradient Flow from Loss to Backbone:
+    head_fc avg:       4.3438e+00
+    interaction avg:   3.7815e+00
+    heads avg:         3.0282e+00
+    backbone avg:      1.4083e+03
+    Gradient ratio (head_fc/backbone): 0.00x
+
+============================================================
+5. Gradient Norm Evolution Over 5 Training Steps
+============================================================
+
+  Step 0: loss=2.9987
+    Total grad norm: 1.1047e+05
+    BN grad norm: 2.8333e+03
+    Non-BN grad norm: 1.1043e+05
+
+  Step 4: loss=0.6000
+    Total grad norm: 3.4172e+04
+    BN grad norm: 8.6629e+02
+    Non-BN grad norm: 3.4161e+04
+
+  Gradient evolution data saved to: D:\HuaweiMoveData\Users\官海峰\Desktop\2026春\人工智能\Project1-街景字符识别\Street_Character_Recognition\gradient_analysis_output\gradient_evolution.json
+
+============================================================
+Gradient Analysis Complete!
+Report saved to: D:\HuaweiMoveData\Users\官海峰\Desktop\2026春\人工智能\Project1-街景字符识别\Street_Character_Recognition\gradient_analysis_output\gradient_analysis_report.txt
+Data saved to: D:\HuaweiMoveData\Users\官海峰\Desktop\2026春\人工智能\Project1-街景字符识别\Street_Character_Recognition\gradient_analysis_output
+============================================================

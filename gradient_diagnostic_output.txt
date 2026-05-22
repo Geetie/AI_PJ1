@@ -1,0 +1,1375 @@
+[INFO] Using device: cpu
+============================================================
+Street Character Recognition - Gradient Diagnostic
+Timestamp: 2026-05-22 20:04:18
+Output file: D:\HuaweiMoveData\Users\官海峰\Desktop\2026春\人工智能\Project1-街景字符识别\Street_Character_Recognition\gradient_diagnostic_output.txt
+============================================================
+
+[INFO] Creating model...
+[INFO] Total params: 107,115,398
+[INFO] Trainable params: 107,115,398
+
+[INFO] Using dummy test data with batch_size=2...
+
+============================================================
+1. Parameter Initialization Check
+============================================================
+✅ backbone.stem.0.weight: mean=0.0000, std=0.0252
+⚠️  Potential issue with backbone.stem.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.stem.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer1.0.conv1.weight: mean=-0.0046, std=0.1749
+⚠️  Potential issue with backbone.layer1.0.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer1.0.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer1.0.conv2.weight: mean=-0.0002, std=0.0590
+⚠️  Potential issue with backbone.layer1.0.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer1.0.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer1.0.conv3.weight: mean=-0.0000, std=0.0890
+⚠️  Potential issue with backbone.layer1.0.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer1.0.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer1.0.downsample.0.weight: mean=0.0008, std=0.0886
+⚠️  Potential issue with backbone.layer1.0.downsample.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer1.0.downsample.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer1.1.conv1.weight: mean=-0.0003, std=0.1774
+⚠️  Potential issue with backbone.layer1.1.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer1.1.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer1.1.conv2.weight: mean=-0.0003, std=0.0588
+⚠️  Potential issue with backbone.layer1.1.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer1.1.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer1.1.conv3.weight: mean=0.0002, std=0.0880
+⚠️  Potential issue with backbone.layer1.1.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer1.1.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer1.2.conv1.weight: mean=-0.0006, std=0.1769
+⚠️  Potential issue with backbone.layer1.2.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer1.2.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer1.2.conv2.weight: mean=0.0002, std=0.0588
+⚠️  Potential issue with backbone.layer1.2.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer1.2.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer1.2.conv3.weight: mean=0.0002, std=0.0886
+⚠️  Potential issue with backbone.layer1.2.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer1.2.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.0.conv1.weight: mean=-0.0004, std=0.1243
+⚠️  Potential issue with backbone.layer2.0.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.0.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.0.conv2.weight: mean=0.0001, std=0.0417
+⚠️  Potential issue with backbone.layer2.0.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.0.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.0.conv3.weight: mean=-0.0002, std=0.0629
+⚠️  Potential issue with backbone.layer2.0.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.0.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.0.downsample.0.weight: mean=0.0001, std=0.0624
+⚠️  Potential issue with backbone.layer2.0.downsample.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.0.downsample.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.1.conv1.weight: mean=0.0001, std=0.1249
+⚠️  Potential issue with backbone.layer2.1.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.1.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.1.conv2.weight: mean=-0.0002, std=0.0417
+⚠️  Potential issue with backbone.layer2.1.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.1.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.1.conv3.weight: mean=-0.0000, std=0.0625
+⚠️  Potential issue with backbone.layer2.1.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.1.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.2.conv1.weight: mean=0.0004, std=0.1250
+⚠️  Potential issue with backbone.layer2.2.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.2.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.2.conv2.weight: mean=-0.0001, std=0.0417
+⚠️  Potential issue with backbone.layer2.2.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.2.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.2.conv3.weight: mean=0.0003, std=0.0621
+⚠️  Potential issue with backbone.layer2.2.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.2.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.3.conv1.weight: mean=0.0001, std=0.1248
+⚠️  Potential issue with backbone.layer2.3.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.3.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.3.conv2.weight: mean=0.0002, std=0.0416
+⚠️  Potential issue with backbone.layer2.3.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.3.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer2.3.conv3.weight: mean=-0.0003, std=0.0623
+⚠️  Potential issue with backbone.layer2.3.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer2.3.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.0.conv1.weight: mean=-0.0000, std=0.0885
+⚠️  Potential issue with backbone.layer3.0.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.0.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.0.conv2.weight: mean=-0.0000, std=0.0295
+⚠️  Potential issue with backbone.layer3.0.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.0.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.0.conv3.weight: mean=-0.0001, std=0.0442
+⚠️  Potential issue with backbone.layer3.0.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.0.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.0.downsample.0.weight: mean=-0.0001, std=0.0442
+⚠️  Potential issue with backbone.layer3.0.downsample.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.0.downsample.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.1.conv1.weight: mean=0.0001, std=0.0885
+⚠️  Potential issue with backbone.layer3.1.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.1.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.1.conv2.weight: mean=-0.0001, std=0.0294
+⚠️  Potential issue with backbone.layer3.1.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.1.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.1.conv3.weight: mean=0.0000, std=0.0440
+⚠️  Potential issue with backbone.layer3.1.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.1.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.2.conv1.weight: mean=0.0002, std=0.0883
+⚠️  Potential issue with backbone.layer3.2.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.2.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.2.conv2.weight: mean=-0.0001, std=0.0294
+⚠️  Potential issue with backbone.layer3.2.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.2.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.2.conv3.weight: mean=-0.0000, std=0.0441
+⚠️  Potential issue with backbone.layer3.2.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.2.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.3.conv1.weight: mean=-0.0000, std=0.0883
+⚠️  Potential issue with backbone.layer3.3.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.3.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.3.conv2.weight: mean=-0.0000, std=0.0295
+⚠️  Potential issue with backbone.layer3.3.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.3.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.3.conv3.weight: mean=0.0002, std=0.0442
+⚠️  Potential issue with backbone.layer3.3.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.3.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.4.conv1.weight: mean=0.0003, std=0.0883
+⚠️  Potential issue with backbone.layer3.4.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.4.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.4.conv2.weight: mean=0.0000, std=0.0294
+⚠️  Potential issue with backbone.layer3.4.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.4.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.4.conv3.weight: mean=-0.0000, std=0.0441
+⚠️  Potential issue with backbone.layer3.4.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.4.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.5.conv1.weight: mean=-0.0000, std=0.0883
+⚠️  Potential issue with backbone.layer3.5.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.5.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.5.conv2.weight: mean=0.0000, std=0.0295
+⚠️  Potential issue with backbone.layer3.5.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.5.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.5.conv3.weight: mean=0.0001, std=0.0441
+⚠️  Potential issue with backbone.layer3.5.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.5.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.6.conv1.weight: mean=0.0001, std=0.0882
+⚠️  Potential issue with backbone.layer3.6.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.6.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.6.conv2.weight: mean=-0.0000, std=0.0294
+⚠️  Potential issue with backbone.layer3.6.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.6.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.6.conv3.weight: mean=-0.0000, std=0.0443
+⚠️  Potential issue with backbone.layer3.6.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.6.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.7.conv1.weight: mean=0.0002, std=0.0881
+⚠️  Potential issue with backbone.layer3.7.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.7.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.7.conv2.weight: mean=0.0000, std=0.0295
+⚠️  Potential issue with backbone.layer3.7.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.7.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.7.conv3.weight: mean=0.0001, std=0.0442
+⚠️  Potential issue with backbone.layer3.7.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.7.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.8.conv1.weight: mean=0.0001, std=0.0884
+⚠️  Potential issue with backbone.layer3.8.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.8.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.8.conv2.weight: mean=-0.0000, std=0.0295
+⚠️  Potential issue with backbone.layer3.8.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.8.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.8.conv3.weight: mean=0.0000, std=0.0442
+⚠️  Potential issue with backbone.layer3.8.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.8.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.9.conv1.weight: mean=-0.0002, std=0.0884
+⚠️  Potential issue with backbone.layer3.9.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.9.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.9.conv2.weight: mean=0.0000, std=0.0295
+⚠️  Potential issue with backbone.layer3.9.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.9.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.9.conv3.weight: mean=-0.0002, std=0.0442
+⚠️  Potential issue with backbone.layer3.9.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.9.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.10.conv1.weight: mean=-0.0003, std=0.0887
+⚠️  Potential issue with backbone.layer3.10.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.10.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.10.conv2.weight: mean=-0.0000, std=0.0295
+⚠️  Potential issue with backbone.layer3.10.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.10.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.10.conv3.weight: mean=0.0000, std=0.0443
+⚠️  Potential issue with backbone.layer3.10.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.10.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.11.conv1.weight: mean=-0.0001, std=0.0883
+⚠️  Potential issue with backbone.layer3.11.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.11.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.11.conv2.weight: mean=0.0000, std=0.0294
+⚠️  Potential issue with backbone.layer3.11.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.11.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.11.conv3.weight: mean=-0.0000, std=0.0441
+⚠️  Potential issue with backbone.layer3.11.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.11.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.12.conv1.weight: mean=-0.0006, std=0.0882
+⚠️  Potential issue with backbone.layer3.12.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.12.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.12.conv2.weight: mean=0.0000, std=0.0294
+⚠️  Potential issue with backbone.layer3.12.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.12.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.12.conv3.weight: mean=0.0000, std=0.0442
+⚠️  Potential issue with backbone.layer3.12.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.12.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.13.conv1.weight: mean=0.0003, std=0.0883
+⚠️  Potential issue with backbone.layer3.13.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.13.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.13.conv2.weight: mean=-0.0000, std=0.0294
+⚠️  Potential issue with backbone.layer3.13.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.13.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.13.conv3.weight: mean=0.0002, std=0.0443
+⚠️  Potential issue with backbone.layer3.13.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.13.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.14.conv1.weight: mean=0.0001, std=0.0885
+⚠️  Potential issue with backbone.layer3.14.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.14.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.14.conv2.weight: mean=0.0000, std=0.0295
+⚠️  Potential issue with backbone.layer3.14.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.14.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.14.conv3.weight: mean=-0.0002, std=0.0442
+⚠️  Potential issue with backbone.layer3.14.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.14.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.15.conv1.weight: mean=-0.0000, std=0.0886
+⚠️  Potential issue with backbone.layer3.15.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.15.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.15.conv2.weight: mean=-0.0000, std=0.0295
+⚠️  Potential issue with backbone.layer3.15.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.15.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.15.conv3.weight: mean=-0.0002, std=0.0442
+⚠️  Potential issue with backbone.layer3.15.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.15.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.16.conv1.weight: mean=-0.0003, std=0.0882
+⚠️  Potential issue with backbone.layer3.16.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.16.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.16.conv2.weight: mean=0.0000, std=0.0295
+⚠️  Potential issue with backbone.layer3.16.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.16.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.16.conv3.weight: mean=0.0001, std=0.0442
+⚠️  Potential issue with backbone.layer3.16.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.16.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.17.conv1.weight: mean=-0.0002, std=0.0883
+⚠️  Potential issue with backbone.layer3.17.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.17.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.17.conv2.weight: mean=0.0000, std=0.0294
+⚠️  Potential issue with backbone.layer3.17.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.17.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.17.conv3.weight: mean=0.0000, std=0.0442
+⚠️  Potential issue with backbone.layer3.17.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.17.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.18.conv1.weight: mean=-0.0001, std=0.0883
+⚠️  Potential issue with backbone.layer3.18.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.18.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.18.conv2.weight: mean=0.0000, std=0.0295
+⚠️  Potential issue with backbone.layer3.18.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.18.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.18.conv3.weight: mean=-0.0000, std=0.0441
+⚠️  Potential issue with backbone.layer3.18.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.18.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.19.conv1.weight: mean=-0.0004, std=0.0884
+⚠️  Potential issue with backbone.layer3.19.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.19.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.19.conv2.weight: mean=-0.0000, std=0.0294
+⚠️  Potential issue with backbone.layer3.19.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.19.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.19.conv3.weight: mean=0.0001, std=0.0442
+⚠️  Potential issue with backbone.layer3.19.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.19.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.20.conv1.weight: mean=-0.0001, std=0.0886
+⚠️  Potential issue with backbone.layer3.20.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.20.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.20.conv2.weight: mean=0.0000, std=0.0294
+⚠️  Potential issue with backbone.layer3.20.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.20.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.20.conv3.weight: mean=0.0000, std=0.0441
+⚠️  Potential issue with backbone.layer3.20.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.20.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.21.conv1.weight: mean=-0.0002, std=0.0883
+⚠️  Potential issue with backbone.layer3.21.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.21.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.21.conv2.weight: mean=0.0000, std=0.0294
+⚠️  Potential issue with backbone.layer3.21.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.21.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.21.conv3.weight: mean=0.0000, std=0.0442
+⚠️  Potential issue with backbone.layer3.21.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.21.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.22.conv1.weight: mean=0.0002, std=0.0885
+⚠️  Potential issue with backbone.layer3.22.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.22.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.22.conv2.weight: mean=-0.0000, std=0.0294
+⚠️  Potential issue with backbone.layer3.22.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.22.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer3.22.conv3.weight: mean=0.0000, std=0.0442
+⚠️  Potential issue with backbone.layer3.22.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer3.22.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer4.0.conv1.weight: mean=-0.0000, std=0.0625
+⚠️  Potential issue with backbone.layer4.0.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer4.0.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer4.0.conv2.weight: mean=-0.0000, std=0.0208
+⚠️  Potential issue with backbone.layer4.0.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer4.0.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer4.0.conv3.weight: mean=-0.0000, std=0.0313
+⚠️  Potential issue with backbone.layer4.0.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer4.0.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer4.0.downsample.0.weight: mean=-0.0000, std=0.0312
+⚠️  Potential issue with backbone.layer4.0.downsample.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer4.0.downsample.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer4.1.conv1.weight: mean=0.0001, std=0.0624
+⚠️  Potential issue with backbone.layer4.1.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer4.1.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer4.1.conv2.weight: mean=0.0000, std=0.0208
+⚠️  Potential issue with backbone.layer4.1.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer4.1.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer4.1.conv3.weight: mean=0.0000, std=0.0313
+⚠️  Potential issue with backbone.layer4.1.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer4.1.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer4.2.conv1.weight: mean=0.0000, std=0.0625
+⚠️  Potential issue with backbone.layer4.2.bn1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer4.2.bn1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer4.2.conv2.weight: mean=0.0000, std=0.0209
+⚠️  Potential issue with backbone.layer4.2.bn2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer4.2.bn2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.layer4.2.conv3.weight: mean=-0.0000, std=0.0312
+⚠️  Potential issue with backbone.layer4.2.bn3.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.layer4.2.bn3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.l1_reduce.0.weight: mean=0.0008, std=0.1253
+⚠️  Potential issue with backbone.l1_reduce.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.l1_reduce.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.l2_reduce.0.weight: mean=0.0003, std=0.0885
+⚠️  Potential issue with backbone.l2_reduce.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.l2_reduce.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.l2_to_p1.0.weight: mean=-0.0006, std=0.1242
+⚠️  Potential issue with backbone.l2_to_p1.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.l2_to_p1.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.l3_reduce.0.weight: mean=-0.0001, std=0.0882
+⚠️  Potential issue with backbone.l3_reduce.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.l3_reduce.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.l4_reduce.0.weight: mean=0.0002, std=0.0883
+⚠️  Potential issue with backbone.l4_reduce.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.l4_reduce.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.smooth_p3.0.weight: mean=-0.0001, std=0.0295
+⚠️  Potential issue with backbone.smooth_p3.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.smooth_p3.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.smooth_p2.0.weight: mean=0.0000, std=0.0295
+⚠️  Potential issue with backbone.smooth_p2.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.smooth_p2.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.smooth_p1.0.weight: mean=-0.0000, std=0.0418
+⚠️  Potential issue with backbone.smooth_p1.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.smooth_p1.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.fuse.0.weight: mean=-0.0000, std=0.0208
+⚠️  Potential issue with backbone.fuse.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with backbone.fuse.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ backbone.se.fc.0.weight: mean=-0.0006, std=0.0607
+✅ backbone.se.fc.2.weight: mean=0.0003, std=0.0607
+✅ pre_head_comm.pos_proj.0.weight: mean=0.0100, std=0.2570
+⚠️  Potential issue with pre_head_comm.pos_proj.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with pre_head_comm.pos_proj.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ pre_head_comm.comm_conv.0.weight: mean=-0.0001, std=0.0624
+⚠️  Potential issue with pre_head_comm.comm_conv.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with pre_head_comm.comm_conv.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.0.pos_embed: mean=-0.0002, std=0.1007
+✅ heads.0.head_embed: mean=-0.0072, std=0.1105
+⚠️  Potential issue with heads.0.norm_input.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.0.norm_input.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.0.attention_conv.0.weight: mean=0.0002, std=0.0187
+⚠️  Potential issue with heads.0.attention_conv.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.0.attention_conv.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.0.attention_conv.3.weight: mean=-0.0002, std=0.0881
+⚠️  Potential issue with heads.0.attention_conv.4.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.0.attention_conv.4.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.0.attention_conv.6.weight: mean=-0.0001, std=0.0416
+⚠️  Potential issue with heads.0.attention_conv.7.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.0.attention_conv.7.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.0.attention_conv.9.weight: mean=-0.0276, std=0.5013
+⚠️  Potential issue with heads.0.attention_conv.9.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.0.feat_proj.0.weight: mean=0.0000, std=0.0147
+⚠️  Potential issue with heads.0.feat_proj.0.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+⚠️  Potential issue with heads.0.feat_proj.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.0.feat_proj.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.0.cls_layer.weight: mean=0.0008, std=0.0441
+⚠️  Potential issue with heads.0.cls_layer.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.0.bbox_head.0.weight: mean=-0.0000, std=0.0152
+⚠️  Potential issue with heads.0.bbox_head.0.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+⚠️  Potential issue with heads.0.bbox_head.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.0.bbox_head.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.0.bbox_head.3.weight: mean=-0.0020, std=0.0624
+⚠️  Potential issue with heads.0.bbox_head.3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.1.pos_embed: mean=-0.0007, std=0.1002
+✅ heads.1.head_embed: mean=-0.0210, std=0.1039
+⚠️  Potential issue with heads.1.norm_input.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.1.norm_input.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.1.attention_conv.0.weight: mean=0.0004, std=0.0187
+⚠️  Potential issue with heads.1.attention_conv.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.1.attention_conv.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.1.attention_conv.3.weight: mean=-0.0002, std=0.0882
+⚠️  Potential issue with heads.1.attention_conv.4.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.1.attention_conv.4.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.1.attention_conv.6.weight: mean=0.0000, std=0.0417
+⚠️  Potential issue with heads.1.attention_conv.7.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.1.attention_conv.7.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.1.attention_conv.9.weight: mean=0.0117, std=0.5151
+⚠️  Potential issue with heads.1.attention_conv.9.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.1.feat_proj.0.weight: mean=-0.0000, std=0.0147
+⚠️  Potential issue with heads.1.feat_proj.0.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+⚠️  Potential issue with heads.1.feat_proj.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.1.feat_proj.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.1.cls_layer.weight: mean=0.0003, std=0.0440
+⚠️  Potential issue with heads.1.cls_layer.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.1.bbox_head.0.weight: mean=-0.0000, std=0.0152
+⚠️  Potential issue with heads.1.bbox_head.0.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+⚠️  Potential issue with heads.1.bbox_head.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.1.bbox_head.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.1.bbox_head.3.weight: mean=-0.0003, std=0.0617
+⚠️  Potential issue with heads.1.bbox_head.3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.2.pos_embed: mean=-0.0003, std=0.0994
+✅ heads.2.head_embed: mean=-0.0166, std=0.1042
+⚠️  Potential issue with heads.2.norm_input.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.2.norm_input.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.2.attention_conv.0.weight: mean=-0.0002, std=0.0189
+⚠️  Potential issue with heads.2.attention_conv.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.2.attention_conv.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.2.attention_conv.3.weight: mean=-0.0003, std=0.0886
+⚠️  Potential issue with heads.2.attention_conv.4.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.2.attention_conv.4.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.2.attention_conv.6.weight: mean=-0.0001, std=0.0416
+⚠️  Potential issue with heads.2.attention_conv.7.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.2.attention_conv.7.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.2.attention_conv.9.weight: mean=0.0298, std=0.5022
+⚠️  Potential issue with heads.2.attention_conv.9.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.2.feat_proj.0.weight: mean=0.0000, std=0.0147
+⚠️  Potential issue with heads.2.feat_proj.0.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+⚠️  Potential issue with heads.2.feat_proj.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.2.feat_proj.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.2.cls_layer.weight: mean=-0.0000, std=0.0439
+⚠️  Potential issue with heads.2.cls_layer.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.2.bbox_head.0.weight: mean=0.0000, std=0.0152
+⚠️  Potential issue with heads.2.bbox_head.0.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+⚠️  Potential issue with heads.2.bbox_head.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with heads.2.bbox_head.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ heads.2.bbox_head.3.weight: mean=-0.0004, std=0.0618
+⚠️  Potential issue with heads.2.bbox_head.3.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cnn.0.0.weight: mean=0.0000, std=0.0295
+⚠️  Potential issue with roi_cnn.0.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with roi_cnn.0.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cnn.0.3.weight: mean=-0.0000, std=0.0295
+⚠️  Potential issue with roi_cnn.0.4.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with roi_cnn.0.4.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cnn.0.8.weight: mean=-0.0002, std=0.0623
+⚠️  Potential issue with roi_cnn.0.8.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+⚠️  Potential issue with roi_cnn.0.9.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with roi_cnn.0.9.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cnn.1.0.weight: mean=-0.0000, std=0.0295
+⚠️  Potential issue with roi_cnn.1.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with roi_cnn.1.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cnn.1.3.weight: mean=-0.0000, std=0.0294
+⚠️  Potential issue with roi_cnn.1.4.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with roi_cnn.1.4.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cnn.1.8.weight: mean=0.0004, std=0.0624
+⚠️  Potential issue with roi_cnn.1.8.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+⚠️  Potential issue with roi_cnn.1.9.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with roi_cnn.1.9.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cnn.2.0.weight: mean=0.0000, std=0.0295
+⚠️  Potential issue with roi_cnn.2.1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with roi_cnn.2.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cnn.2.3.weight: mean=-0.0000, std=0.0294
+⚠️  Potential issue with roi_cnn.2.4.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with roi_cnn.2.4.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cnn.2.8.weight: mean=-0.0001, std=0.0624
+⚠️  Potential issue with roi_cnn.2.8.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+⚠️  Potential issue with roi_cnn.2.9.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with roi_cnn.2.9.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cls_heads.0.weight: mean=0.0010, std=0.0856
+⚠️  Potential issue with roi_cls_heads.0.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cls_heads.1.weight: mean=0.0010, std=0.0862
+⚠️  Potential issue with roi_cls_heads.1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ roi_cls_heads.2.weight: mean=-0.0003, std=0.0872
+⚠️  Potential issue with roi_cls_heads.2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ head_interaction.learnable_pos: mean=-0.0005, std=0.0197
+✅ head_interaction.self_attn.in_proj_weight: mean=-0.0000, std=0.0221
+⚠️  Potential issue with head_interaction.self_attn.in_proj_bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ head_interaction.self_attn.out_proj.weight: mean=-0.0000, std=0.0180
+⚠️  Potential issue with head_interaction.self_attn.out_proj.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+⚠️  Potential issue with head_interaction.norm1.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with head_interaction.norm1.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+⚠️  Potential issue with head_interaction.norm2.weight:
+   mean=1.0000, std=0.0000, range=[1.0000, 1.0000]
+⚠️  Potential issue with head_interaction.norm2.bias:
+   mean=0.0000, std=0.0000, range=[0.0000, 0.0000]
+✅ head_interaction.ffn.0.weight: mean=0.0000, std=0.0180
+✅ head_interaction.ffn.0.bias: mean=0.0002, std=0.0178
+✅ head_interaction.ffn.3.weight: mean=-0.0000, std=0.0090
+✅ head_interaction.ffn.3.bias: mean=0.0004, std=0.0090
+✅ head_fc.0.weight: mean=-0.0003, std=0.0180
+✅ head_fc.0.bias: mean=-0.0083, std=0.0169
+✅ head_fc.1.weight: mean=0.0000, std=0.0182
+✅ head_fc.1.bias: mean=-0.0062, std=0.0130
+✅ head_fc.2.weight: mean=-0.0000, std=0.0180
+✅ head_fc.2.bias: mean=-0.0016, std=0.0212
+✅ length_head.2.weight: mean=-0.0002, std=0.0255
+✅ length_head.2.bias: mean=0.0003, std=0.0254
+✅ length_head.5.weight: mean=-0.0144, std=0.0730
+✅ length_head.5.bias: mean=0.0373, std=0.0834
+
+============================================================
+2. Gradient Flow Check
+============================================================
+  Total loss: 3.5035
+  Classification loss: 3.3789
+  Length loss: 1.2460
+⚠️  backbone.stem.0.weight: Very large gradient (norm=1.30e+05)
+⚠️  backbone.stem.1.weight: Very large gradient (norm=2.28e+03)
+⚠️  backbone.stem.1.bias: Very large gradient (norm=1.53e+02)
+⚠️  backbone.layer1.0.conv1.weight: Very large gradient (norm=9.42e+03)
+⚠️  backbone.layer1.0.bn1.weight: Very large gradient (norm=1.18e+03)
+⚠️  backbone.layer1.0.bn1.bias: Very large gradient (norm=9.54e+02)
+⚠️  backbone.layer1.0.conv2.weight: Very large gradient (norm=2.29e+04)
+⚠️  backbone.layer1.0.bn2.weight: Very large gradient (norm=1.08e+03)
+⚠️  backbone.layer1.0.bn2.bias: Very large gradient (norm=9.81e+02)
+⚠️  backbone.layer1.0.conv3.weight: Very large gradient (norm=1.26e+04)
+⚠️  backbone.layer1.0.bn3.weight: Very large gradient (norm=1.04e+03)
+⚠️  backbone.layer1.0.bn3.bias: Very large gradient (norm=8.03e+02)
+⚠️  backbone.layer1.0.downsample.0.weight: Very large gradient (norm=1.27e+04)
+⚠️  backbone.layer1.0.downsample.1.weight: Very large gradient (norm=1.04e+03)
+⚠️  backbone.layer1.0.downsample.1.bias: Very large gradient (norm=8.03e+02)
+⚠️  backbone.layer1.1.conv1.weight: Very large gradient (norm=6.26e+03)
+⚠️  backbone.layer1.1.bn1.weight: Very large gradient (norm=9.31e+02)
+⚠️  backbone.layer1.1.bn1.bias: Very large gradient (norm=7.72e+02)
+⚠️  backbone.layer1.1.conv2.weight: Very large gradient (norm=1.54e+04)
+⚠️  backbone.layer1.1.bn2.weight: Very large gradient (norm=7.50e+02)
+⚠️  backbone.layer1.1.bn2.bias: Very large gradient (norm=6.04e+02)
+⚠️  backbone.layer1.1.conv3.weight: Very large gradient (norm=8.47e+03)
+⚠️  backbone.layer1.1.bn3.weight: Very large gradient (norm=6.26e+02)
+⚠️  backbone.layer1.1.bn3.bias: Very large gradient (norm=4.32e+02)
+⚠️  backbone.layer1.2.conv1.weight: Very large gradient (norm=4.20e+03)
+⚠️  backbone.layer1.2.bn1.weight: Very large gradient (norm=6.30e+02)
+⚠️  backbone.layer1.2.bn1.bias: Very large gradient (norm=4.77e+02)
+⚠️  backbone.layer1.2.conv2.weight: Very large gradient (norm=1.04e+04)
+⚠️  backbone.layer1.2.bn2.weight: Very large gradient (norm=4.74e+02)
+⚠️  backbone.layer1.2.bn2.bias: Very large gradient (norm=4.32e+02)
+⚠️  backbone.layer1.2.conv3.weight: Very large gradient (norm=5.87e+03)
+⚠️  backbone.layer1.2.bn3.weight: Very large gradient (norm=4.47e+02)
+⚠️  backbone.layer1.2.bn3.bias: Very large gradient (norm=2.78e+02)
+⚠️  backbone.layer2.0.conv1.weight: Very large gradient (norm=4.70e+03)
+⚠️  backbone.layer2.0.bn1.weight: Very large gradient (norm=4.63e+02)
+⚠️  backbone.layer2.0.bn1.bias: Very large gradient (norm=4.23e+02)
+⚠️  backbone.layer2.0.conv2.weight: Very large gradient (norm=1.15e+04)
+⚠️  backbone.layer2.0.bn2.weight: Very large gradient (norm=4.27e+02)
+⚠️  backbone.layer2.0.bn2.bias: Very large gradient (norm=3.43e+02)
+⚠️  backbone.layer2.0.conv3.weight: Very large gradient (norm=6.31e+03)
+⚠️  backbone.layer2.0.bn3.weight: Very large gradient (norm=3.58e+02)
+⚠️  backbone.layer2.0.bn3.bias: Very large gradient (norm=2.83e+02)
+⚠️  backbone.layer2.0.downsample.0.weight: Very large gradient (norm=6.37e+03)
+⚠️  backbone.layer2.0.downsample.1.weight: Very large gradient (norm=3.52e+02)
+⚠️  backbone.layer2.0.downsample.1.bias: Very large gradient (norm=2.83e+02)
+⚠️  backbone.layer2.1.conv1.weight: Very large gradient (norm=3.12e+03)
+⚠️  backbone.layer2.1.bn1.weight: Very large gradient (norm=3.25e+02)
+⚠️  backbone.layer2.1.bn1.bias: Very large gradient (norm=2.81e+02)
+⚠️  backbone.layer2.1.conv2.weight: Very large gradient (norm=7.75e+03)
+⚠️  backbone.layer2.1.bn2.weight: Very large gradient (norm=2.59e+02)
+⚠️  backbone.layer2.1.bn2.bias: Very large gradient (norm=2.27e+02)
+⚠️  backbone.layer2.1.conv3.weight: Very large gradient (norm=4.26e+03)
+⚠️  backbone.layer2.1.bn3.weight: Very large gradient (norm=2.29e+02)
+⚠️  backbone.layer2.1.bn3.bias: Very large gradient (norm=1.65e+02)
+⚠️  backbone.layer2.2.conv1.weight: Very large gradient (norm=2.11e+03)
+⚠️  backbone.layer2.2.bn1.weight: Very large gradient (norm=2.42e+02)
+⚠️  backbone.layer2.2.bn1.bias: Very large gradient (norm=1.68e+02)
+⚠️  backbone.layer2.2.conv2.weight: Very large gradient (norm=5.23e+03)
+⚠️  backbone.layer2.2.bn2.weight: Very large gradient (norm=1.74e+02)
+⚠️  backbone.layer2.2.bn2.bias: Very large gradient (norm=1.55e+02)
+⚠️  backbone.layer2.2.conv3.weight: Very large gradient (norm=2.91e+03)
+⚠️  backbone.layer2.2.bn3.weight: Very large gradient (norm=1.60e+02)
+⚠️  backbone.layer2.2.bn3.bias: Very large gradient (norm=1.07e+02)
+⚠️  backbone.layer2.3.conv1.weight: Very large gradient (norm=1.53e+03)
+⚠️  backbone.layer2.3.bn1.weight: Very large gradient (norm=1.65e+02)
+⚠️  backbone.layer2.3.bn1.bias: Very large gradient (norm=1.42e+02)
+⚠️  backbone.layer2.3.conv2.weight: Very large gradient (norm=3.79e+03)
+⚠️  backbone.layer2.3.bn2.weight: Very large gradient (norm=1.36e+02)
+⚠️  backbone.layer2.3.bn2.bias: Very large gradient (norm=1.13e+02)
+⚠️  backbone.layer2.3.conv3.weight: Very large gradient (norm=2.10e+03)
+⚠️  backbone.layer2.3.bn3.weight: Very large gradient (norm=1.09e+02)
+⚠️  backbone.layer3.0.conv1.weight: Very large gradient (norm=1.84e+03)
+⚠️  backbone.layer3.0.bn1.weight: Very large gradient (norm=1.33e+02)
+⚠️  backbone.layer3.0.bn1.bias: Very large gradient (norm=1.21e+02)
+⚠️  backbone.layer3.0.conv2.weight: Very large gradient (norm=4.56e+03)
+⚠️  backbone.layer3.0.bn2.weight: Very large gradient (norm=1.09e+02)
+⚠️  backbone.layer3.0.bn2.bias: Very large gradient (norm=1.01e+02)
+⚠️  backbone.layer3.0.conv3.weight: Very large gradient (norm=2.51e+03)
+⚠️  backbone.layer3.0.bn3.weight: Very large gradient (norm=1.05e+02)
+⚠️  backbone.layer3.0.downsample.0.weight: Very large gradient (norm=2.49e+03)
+⚠️  backbone.layer3.0.downsample.1.weight: Very large gradient (norm=1.04e+02)
+⚠️  backbone.layer3.1.conv1.weight: Very large gradient (norm=1.24e+03)
+⚠️  backbone.layer3.1.conv2.weight: Very large gradient (norm=3.08e+03)
+⚠️  backbone.layer3.1.conv3.weight: Very large gradient (norm=1.69e+03)
+⚠️  backbone.layer3.2.conv1.weight: Very large gradient (norm=8.32e+02)
+⚠️  backbone.layer3.2.conv2.weight: Very large gradient (norm=2.07e+03)
+⚠️  backbone.layer3.2.conv3.weight: Very large gradient (norm=1.15e+03)
+⚠️  backbone.layer3.3.conv1.weight: Very large gradient (norm=6.01e+02)
+⚠️  backbone.layer3.3.conv2.weight: Very large gradient (norm=1.49e+03)
+⚠️  backbone.layer3.3.conv3.weight: Very large gradient (norm=8.28e+02)
+⚠️  backbone.layer3.4.conv1.weight: Very large gradient (norm=4.54e+02)
+⚠️  backbone.layer3.4.conv2.weight: Very large gradient (norm=1.12e+03)
+⚠️  backbone.layer3.4.conv3.weight: Very large gradient (norm=6.16e+02)
+⚠️  backbone.layer3.5.conv1.weight: Very large gradient (norm=3.48e+02)
+⚠️  backbone.layer3.5.conv2.weight: Very large gradient (norm=8.62e+02)
+⚠️  backbone.layer3.5.conv3.weight: Very large gradient (norm=4.79e+02)
+⚠️  backbone.layer3.6.conv1.weight: Very large gradient (norm=2.78e+02)
+⚠️  backbone.layer3.6.conv2.weight: Very large gradient (norm=6.90e+02)
+⚠️  backbone.layer3.6.conv3.weight: Very large gradient (norm=3.78e+02)
+⚠️  backbone.layer3.7.conv1.weight: Very large gradient (norm=2.25e+02)
+⚠️  backbone.layer3.7.conv2.weight: Very large gradient (norm=5.63e+02)
+⚠️  backbone.layer3.7.conv3.weight: Very large gradient (norm=3.08e+02)
+⚠️  backbone.layer3.8.conv1.weight: Very large gradient (norm=1.85e+02)
+⚠️  backbone.layer3.8.conv2.weight: Very large gradient (norm=4.61e+02)
+⚠️  backbone.layer3.8.conv3.weight: Very large gradient (norm=2.55e+02)
+⚠️  backbone.layer3.9.conv1.weight: Very large gradient (norm=1.57e+02)
+⚠️  backbone.layer3.9.conv2.weight: Very large gradient (norm=3.90e+02)
+⚠️  backbone.layer3.9.conv3.weight: Very large gradient (norm=2.14e+02)
+⚠️  backbone.layer3.10.conv1.weight: Very large gradient (norm=1.33e+02)
+⚠️  backbone.layer3.10.conv2.weight: Very large gradient (norm=3.29e+02)
+⚠️  backbone.layer3.10.conv3.weight: Very large gradient (norm=1.81e+02)
+⚠️  backbone.layer3.11.conv1.weight: Very large gradient (norm=1.15e+02)
+⚠️  backbone.layer3.11.conv2.weight: Very large gradient (norm=2.83e+02)
+⚠️  backbone.layer3.11.conv3.weight: Very large gradient (norm=1.57e+02)
+⚠️  backbone.layer3.12.conv2.weight: Very large gradient (norm=2.46e+02)
+⚠️  backbone.layer3.12.conv3.weight: Very large gradient (norm=1.35e+02)
+⚠️  backbone.layer3.13.conv2.weight: Very large gradient (norm=2.16e+02)
+⚠️  backbone.layer3.13.conv3.weight: Very large gradient (norm=1.18e+02)
+⚠️  backbone.layer3.14.conv2.weight: Very large gradient (norm=1.92e+02)
+⚠️  backbone.layer3.14.conv3.weight: Very large gradient (norm=1.05e+02)
+⚠️  backbone.layer3.15.conv2.weight: Very large gradient (norm=1.68e+02)
+⚠️  backbone.layer3.16.conv2.weight: Very large gradient (norm=1.51e+02)
+⚠️  backbone.layer3.17.conv2.weight: Very large gradient (norm=1.35e+02)
+⚠️  backbone.layer3.18.conv2.weight: Very large gradient (norm=1.23e+02)
+⚠️  backbone.layer3.19.conv2.weight: Very large gradient (norm=1.12e+02)
+⚠️  backbone.layer3.20.conv2.weight: Very large gradient (norm=1.02e+02)
+⚠️  backbone.layer4.0.conv2.weight: Very large gradient (norm=2.07e+02)
+⚠️  backbone.layer4.0.conv3.weight: Very large gradient (norm=1.14e+02)
+⚠️  backbone.layer4.0.downsample.0.weight: Very large gradient (norm=1.14e+02)
+⚠️  backbone.layer4.1.conv2.weight: Very large gradient (norm=1.42e+02)
+⚠️  backbone.fuse.0.weight: Very large gradient (norm=1.06e+02)
+⚠️  heads.0.attention_conv.9.bias: Very small gradient (norm=9.95e-08)
+⚠️  heads.1.attention_conv.9.bias: Very small gradient (norm=8.08e-08)
+
+  Gradient Statistics Summary:
+    Total params with grad: 487
+    Min grad norm: 8.0793e-08
+    Max grad norm: 1.2991e+05
+    Mean grad norm: 7.4829e+02
+    NaN gradients: 0
+    Inf gradients: 0
+    Very small gradients (<1e-7): 2
+    Very large gradients (>100): 131
+
+============================================================
+3. Module Activation Check
+============================================================
+✅ backbone.stem.0: mean=-0.0000, std=0.3045
+✅ backbone.stem.1: mean=0.3082, std=0.7558
+✅ backbone.stem.2: mean=0.3082, std=0.7558
+✅ backbone.layer1.0.conv1: mean=-0.8985, std=2.4779
+✅ backbone.layer1.0.bn1: mean=1.4828, std=2.7294
+⚠️  backbone.layer1.0.relu: Activation has large mean (mean=11.1511)
+✅ backbone.layer1.0.conv2: mean=-0.1334, std=4.2705
+✅ backbone.layer1.0.bn2: mean=4.2471, std=6.1360
+✅ backbone.layer1.0.conv3: mean=-0.1083, std=5.1625
+⚠️  backbone.layer1.0.bn3: Activation has large mean (mean=11.1511)
+✅ backbone.layer1.0.downsample.0: mean=0.0679, std=1.2348
+✅ backbone.layer1.0.downsample.1: mean=0.5478, std=4.8282
+✅ backbone.layer1.1.conv1: mean=-2.0939, std=50.1951
+⚠️  backbone.layer1.1.bn1: Activation has large mean (mean=17.8839)
+⚠️  backbone.layer1.1.relu: Activation has large mean (mean=124.6475)
+✅ backbone.layer1.1.conv2: mean=-4.8379, std=43.1193
+⚠️  backbone.layer1.1.bn2: Activation has large mean (mean=41.4644)
+✅ backbone.layer1.1.conv3: mean=-0.2629, std=54.3616
+⚠️  backbone.layer1.1.bn3: Activation has large mean (mean=124.6475)
+⚠️  backbone.layer1.2.conv1: Activation has large mean (mean=-16.2208)
+⚠️  backbone.layer1.2.bn1: Activation has large mean (mean=200.3184)
+⚠️  backbone.layer1.2.relu: Activation has large mean (mean=1381.5834)
+⚠️  backbone.layer1.2.conv2: Activation has large mean (mean=-29.5996)
+⚠️  backbone.layer1.2.bn2: Activation has large mean (mean=496.0412)
+⚠️  backbone.layer1.2.conv3: Activation has large mean (mean=19.2579)
+⚠️  backbone.layer1.2.bn3: Activation has large mean (mean=1381.5834)
+⚠️  backbone.layer2.0.conv1: Activation has large mean (mean=71.9403)
+⚠️  backbone.layer2.0.bn1: Activation has large mean (mean=1882.2435)
+⚠️  backbone.layer2.0.relu: Activation has large mean (mean=13282.8828)
+⚠️  backbone.layer2.0.conv2: Activation has large mean (mean=627.7733)
+⚠️  backbone.layer2.0.bn2: Activation has large mean (mean=5632.7124)
+⚠️  backbone.layer2.0.conv3: Activation has large mean (mean=-270.7939)
+⚠️  backbone.layer2.0.bn3: Activation has large mean (mean=13282.8828)
+⚠️  backbone.layer2.0.downsample.0: Activation has large mean (mean=47.1003)
+⚠️  backbone.layer2.0.downsample.1: Activation has large mean (mean=104.1524)
+⚠️  backbone.layer2.1.conv1: Activation has large mean (mean=8002.9800)
+⚠️  backbone.layer2.1.bn1: Activation has large mean (mean=31476.3262)
+⚠️  backbone.layer2.1.relu: Activation has large mean (mean=186508.1094)
+⚠️  backbone.layer2.1.conv2: Activation has large mean (mean=-12358.0645)
+⚠️  backbone.layer2.1.bn2: Activation has large mean (mean=63787.1602)
+⚠️  backbone.layer2.1.conv3: Activation has large mean (mean=1487.5332)
+⚠️  backbone.layer2.1.bn3: Activation has large mean (mean=186508.1094)
+⚠️  backbone.layer2.2.conv1: Activation has large mean (mean=65454.2773)
+⚠️  backbone.layer2.2.bn1: Activation has large mean (mean=341435.6562)
+⚠️  backbone.layer2.2.relu: Activation has large mean (mean=2552605.0000)
+⚠️  backbone.layer2.2.conv2: Activation has large mean (mean=47047.0000)
+⚠️  backbone.layer2.2.bn2: Activation has large mean (mean=899930.8750)
+⚠️  backbone.layer2.2.conv3: Activation has large mean (mean=39305.3750)
+⚠️  backbone.layer2.2.bn3: Activation has large mean (mean=2552605.0000)
+⚠️  backbone.layer2.3.conv1: Activation has large mean (mean=-495226.1562)
+⚠️  backbone.layer2.3.bn1: Activation has large mean (mean=3074700.7500)
+⚠️  backbone.layer2.3.relu: Activation has large mean (mean=26016290.0000)
+⚠️  backbone.layer2.3.conv2: Activation has large mean (mean=-97627.2109)
+⚠️  backbone.layer2.3.bn2: Activation has large mean (mean=7813890.0000)
+⚠️  backbone.layer2.3.conv3: Activation has large mean (mean=608545.5000)
+⚠️  backbone.layer2.3.bn3: Activation has large mean (mean=26016290.0000)
+⚠️  backbone.layer3.0.conv1: Activation has large mean (mean=-2006668.5000)
+⚠️  backbone.layer3.0.bn1: Activation has large mean (mean=27075712.0000)
+⚠️  backbone.layer3.0.relu: Activation has large mean (mean=179054656.0000)
+⚠️  backbone.layer3.0.conv2: Activation has large mean (mean=330893.9375)
+⚠️  backbone.layer3.0.bn2: Activation has large mean (mean=70009312.0000)
+⚠️  backbone.layer3.0.conv3: Activation has large mean (mean=-1902862.5000)
+⚠️  backbone.layer3.0.bn3: Activation has large mean (mean=179054656.0000)
+⚠️  backbone.layer3.0.downsample.0: Activation has large mean (mean=-1267567.7500)
+⚠️  backbone.layer3.0.downsample.1: Activation has large mean (mean=-2462050.5000)
+⚠️  backbone.layer3.1.conv1: Activation has large mean (mean=93760616.0000)
+⚠️  backbone.layer3.1.bn1: Activation has large mean (mean=408461184.0000)
+⚠️  backbone.layer3.1.relu: Activation has large mean (mean=3035283200.0000)
+⚠️  backbone.layer3.1.conv2: Activation has large mean (mean=-129469984.0000)
+⚠️  backbone.layer3.1.bn2: Activation has large mean (mean=955930880.0000)
+⚠️  backbone.layer3.1.conv3: Activation has large mean (mean=37104920.0000)
+⚠️  backbone.layer3.1.bn3: Activation has large mean (mean=3035283200.0000)
+⚠️  backbone.layer3.2.conv1: Activation has large mean (mean=-267420384.0000)
+⚠️  backbone.layer3.2.bn1: Activation has large mean (mean=4866333696.0000)
+⚠️  backbone.layer3.2.relu: Activation has large mean (mean=39139983360.0000)
+⚠️  backbone.layer3.2.conv2: Activation has large mean (mean=-656530688.0000)
+⚠️  backbone.layer3.2.bn2: Activation has large mean (mean=13740494848.0000)
+⚠️  backbone.layer3.2.conv3: Activation has large mean (mean=-198959536.0000)
+⚠️  backbone.layer3.2.bn3: Activation has large mean (mean=39139983360.0000)
+⚠️  backbone.layer3.3.conv1: Activation has large mean (mean=1338316288.0000)
+⚠️  backbone.layer3.3.bn1: Activation has large mean (mean=52352143360.0000)
+⚠️  backbone.layer3.3.relu: Activation has large mean (mean=498183831552.0000)
+⚠️  backbone.layer3.3.conv2: Activation has large mean (mean=-767812032.0000)
+⚠️  backbone.layer3.3.bn2: Activation has large mean (mean=156972318720.0000)
+⚠️  backbone.layer3.3.conv3: Activation has large mean (mean=14519750656.0000)
+⚠️  backbone.layer3.3.bn3: Activation has large mean (mean=498183831552.0000)
+⚠️  backbone.layer3.4.conv1: Activation has large mean (mean=235302928384.0000)
+⚠️  backbone.layer3.4.bn1: Activation has large mean (mean=665792479232.0000)
+⚠️  backbone.layer3.4.relu: Activation has large mean (mean=5319356841984.0000)
+⚠️  backbone.layer3.4.conv2: Activation has large mean (mean=-93506576384.0000)
+⚠️  backbone.layer3.4.bn2: Activation has large mean (mean=1786193248256.0000)
+⚠️  backbone.layer3.4.conv3: Activation has large mean (mean=54773530624.0000)
+⚠️  backbone.layer3.4.bn3: Activation has large mean (mean=5319356841984.0000)
+⚠️  backbone.layer3.5.conv1: Activation has large mean (mean=-360664334336.0000)
+⚠️  backbone.layer3.5.bn1: Activation has large mean (mean=6146300575744.0000)
+⚠️  backbone.layer3.5.relu: Activation has large mean (mean=47299292037120.0000)
+⚠️  backbone.layer3.5.conv2: Activation has large mean (mean=-74757775360.0000)
+⚠️  backbone.layer3.5.bn2: Activation has large mean (mean=14687315951616.0000)
+⚠️  backbone.layer3.5.conv3: Activation has large mean (mean=1282335571968.0000)
+⚠️  backbone.layer3.5.bn3: Activation has large mean (mean=47299292037120.0000)
+⚠️  backbone.layer3.6.conv1: Activation has large mean (mean=13040076455936.0000)
+⚠️  backbone.layer3.6.bn1: Activation has large mean (mean=50116245323776.0000)
+⚠️  backbone.layer3.6.relu: Activation has large mean (mean=360639478366208.0000)
+⚠️  backbone.layer3.6.conv2: Activation has large mean (mean=-6373526994944.0000)
+⚠️  backbone.layer3.6.bn2: Activation has large mean (mean=115424796606464.0000)
+⚠️  backbone.layer3.6.conv3: Activation has large mean (mean=3317820817408.0000)
+⚠️  backbone.layer3.6.bn3: Activation has large mean (mean=360639478366208.0000)
+⚠️  backbone.layer3.7.conv1: Activation has large mean (mean=-54929381130240.0000)
+⚠️  backbone.layer3.7.bn1: Activation has large mean (mean=316390443581440.0000)
+⚠️  backbone.layer3.7.relu: Activation has large mean (mean=2581474524004352.0000)
+⚠️  backbone.layer3.7.conv2: Activation has large mean (mean=399612772352.0000)
+⚠️  backbone.layer3.7.bn2: Activation has large mean (mean=821561074384896.0000)
+⚠️  backbone.layer3.7.conv3: Activation has large mean (mean=29244442804224.0000)
+⚠️  backbone.layer3.7.bn3: Activation has large mean (mean=2581474524004352.0000)
+⚠️  backbone.layer3.8.conv1: Activation has large mean (mean=-389792374194176.0000)
+⚠️  backbone.layer3.8.bn1: Activation has large mean (mean=2339938179743744.0000)
+⚠️  backbone.layer3.8.relu: Activation has large mean (mean=18634821567774720.0000)
+⚠️  backbone.layer3.8.conv2: Activation has large mean (mean=-258827798708224.0000)
+⚠️  backbone.layer3.8.bn2: Activation has large mean (mean=5755820964839424.0000)
+⚠️  backbone.layer3.8.conv3: Activation has large mean (mean=228953113493504.0000)
+⚠️  backbone.layer3.8.bn3: Activation has large mean (mean=18634821567774720.0000)
+⚠️  backbone.layer3.9.conv1: Activation has large mean (mean=-12561334084304896.0000)
+⚠️  backbone.layer3.9.bn1: Activation has large mean (mean=12056079500312576.0000)
+⚠️  backbone.layer3.9.relu: Activation has large mean (mean=97353568431898624.0000)
+⚠️  backbone.layer3.9.conv2: Activation has large mean (mean=2779806450057216.0000)
+⚠️  backbone.layer3.9.bn2: Activation has large mean (mean=37464686190395392.0000)
+⚠️  backbone.layer3.9.conv3: Activation has large mean (mean=-2584820035092480.0000)
+⚠️  backbone.layer3.9.bn3: Activation has large mean (mean=97353568431898624.0000)
+⚠️  backbone.layer3.10.conv1: Activation has large mean (mean=3351347680247808.0000)
+⚠️  backbone.layer3.10.bn1: Activation has large mean (mean=82643322622967808.0000)
+⚠️  backbone.layer3.10.relu: Activation has large mean (mean=767660601693437952.0000)
+⚠️  backbone.layer3.10.conv2: Activation has large mean (mean=1753049555009536.0000)
+⚠️  backbone.layer3.10.bn2: Activation has large mean (mean=246130969277366272.0000)
+⚠️  backbone.layer3.10.conv3: Activation has large mean (mean=7993308873752576.0000)
+⚠️  backbone.layer3.10.bn3: Activation has large mean (mean=767660601693437952.0000)
+⚠️  backbone.layer3.11.conv1: Activation has large mean (mean=-219619751066861568.0000)
+⚠️  backbone.layer3.11.bn1: Activation has large mean (mean=507428705027489792.0000)
+⚠️  backbone.layer3.11.relu: Activation has large mean (mean=4626740531634896896.0000)
+⚠️  backbone.layer3.11.conv2: Activation has large mean (mean=37411394236186624.0000)
+⚠️  backbone.layer3.11.bn2: Activation has large mean (mean=1498095038205263872.0000)
+⚠️  backbone.layer3.11.conv3: Activation has large mean (mean=69690246719078400.0000)
+⚠️  backbone.layer3.11.bn3: Activation has large mean (mean=4626740531634896896.0000)
+⚠️  backbone.layer3.12.conv1: Activation has large mean (mean=-6176002992706158592.0000)
+⚠️  backbone.layer3.12.bn1: Activation has large mean (mean=2339394331657371648.0000)
+⚠️  backbone.layer3.12.relu: Activation has large mean (mean=24107902945732853760.0000)
+⚠️  backbone.layer3.12.conv2: Activation has large mean (mean=566223577494323200.0000)
+⚠️  backbone.layer3.12.bn2: Activation has large mean (mean=7998304977279778816.0000)
+⚠️  backbone.layer3.12.conv3: Activation has large mean (mean=-112059991719936000.0000)
+⚠️  backbone.layer3.12.bn3: Activation has large mean (mean=24107902945732853760.0000)
+⚠️  backbone.layer3.13.conv1: Activation has large mean (mean=211695381786918912.0000)
+⚠️  backbone.layer3.13.bn1: Activation has large mean (mean=16833530717831954432.0000)
+⚠️  backbone.layer3.13.relu: Activation has large mean (mean=140462751185872355328.0000)
+⚠️  backbone.layer3.13.conv2: Activation has large mean (mean=-955832052463173632.0000)
+⚠️  backbone.layer3.13.bn2: Activation has large mean (mean=41898201194264788992.0000)
+⚠️  backbone.layer3.13.conv3: Activation has large mean (mean=3346439230560665600.0000)
+⚠️  backbone.layer3.13.bn3: Activation has large mean (mean=140462751185872355328.0000)
+⚠️  backbone.layer3.14.conv1: Activation has large mean (mean=29882274132021739520.0000)
+⚠️  backbone.layer3.14.bn1: Activation has large mean (mean=96034538551722901504.0000)
+⚠️  backbone.layer3.14.relu: Activation has large mean (mean=765584844686475919360.0000)
+⚠️  backbone.layer3.14.conv2: Activation has large mean (mean=853149829776277504.0000)
+⚠️  backbone.layer3.14.bn2: Activation has large mean (mean=248519147565558530048.0000)
+⚠️  backbone.layer3.14.conv3: Activation has large mean (mean=1926676974130954240.0000)
+⚠️  backbone.layer3.14.bn3: Activation has large mean (mean=765584844686475919360.0000)
+⚠️  backbone.layer3.15.conv1: Activation has large mean (mean=-85663628219190870016.0000)
+⚠️  backbone.layer3.15.bn1: Activation has large mean (mean=486575412849944821760.0000)
+⚠️  backbone.layer3.15.relu: Activation has large mean (mean=3669628959348538474496.0000)
+⚠️  backbone.layer3.15.conv2: Activation has large mean (mean=-48107675519943704576.0000)
+⚠️  backbone.layer3.15.bn2: Activation has large mean (mean=1237161194899323748352.0000)
+⚠️  backbone.layer3.15.conv3: Activation has large mean (mean=-60124466798326185984.0000)
+⚠️  backbone.layer3.15.bn3: Activation has large mean (mean=3669628959348538474496.0000)
+⚠️  backbone.layer3.16.conv1: Activation has large mean (mean=-674414466411196841984.0000)
+⚠️  backbone.layer3.16.bn1: Activation has large mean (mean=2108510050978596126720.0000)
+⚠️  backbone.layer3.16.relu: Activation has large mean (mean=19121248189900830801920.0000)
+⚠️  backbone.layer3.16.conv2: Activation has large mean (mean=-14571889175566483456.0000)
+⚠️  backbone.layer3.16.bn2: Activation has large mean (mean=6052124078645008400384.0000)
+⚠️  backbone.layer3.16.conv3: Activation has large mean (mean=70599852725729492992.0000)
+⚠️  backbone.layer3.16.bn3: Activation has large mean (mean=19121248189900830801920.0000)
+⚠️  backbone.layer3.17.conv1: Activation has large mean (mean=-1839870333205946040320.0000)
+⚠️  backbone.layer3.17.bn1: Activation has large mean (mean=11107045365198945779712.0000)
+⚠️  backbone.layer3.17.relu: Activation has large mean (mean=89980272237398892478464.0000)
+⚠️  backbone.layer3.17.conv2: Activation has large mean (mean=-486964024239665971200.0000)
+⚠️  backbone.layer3.17.bn2: Activation has large mean (mean=28665573757799792377856.0000)
+⚠️  backbone.layer3.17.conv3: Activation has large mean (mean=328913397094958497792.0000)
+⚠️  backbone.layer3.17.bn3: Activation has large mean (mean=89980272237398892478464.0000)
+⚠️  backbone.layer3.18.conv1: Activation has large mean (mean=-2488353354437720276992.0000)
+⚠️  backbone.layer3.18.bn1: Activation has large mean (mean=55183813198870822780928.0000)
+⚠️  backbone.layer3.18.relu: Activation has large mean (mean=478281848081182447632384.0000)
+⚠️  backbone.layer3.18.conv2: Activation has large mean (mean=9924165915870830264320.0000)
+⚠️  backbone.layer3.18.bn2: Activation has large mean (mean=162425419037660569141248.0000)
+⚠️  backbone.layer3.18.conv3: Activation has large mean (mean=-2684416156840411267072.0000)
+⚠️  backbone.layer3.18.bn3: Activation has large mean (mean=478281848081182447632384.0000)
+⚠️  backbone.layer3.19.conv1: Activation has large mean (mean=-113223809281420014125056.0000)
+⚠️  backbone.layer3.19.bn1: Activation has large mean (mean=261183846459951644934144.0000)
+⚠️  backbone.layer3.19.relu: Activation has large mean (mean=2197492022671494776619008.0000)
+⚠️  backbone.layer3.19.conv2: Activation has large mean (mean=-31036687436412966928384.0000)
+⚠️  backbone.layer3.19.bn2: Activation has large mean (mean=668233448185316583145472.0000)
+⚠️  backbone.layer3.19.conv3: Activation has large mean (mean=27182644235097931251712.0000)
+⚠️  backbone.layer3.19.bn3: Activation has large mean (mean=2197492022671494776619008.0000)
+⚠️  backbone.layer3.20.conv1: Activation has large mean (mean=80420841596349730258944.0000)
+⚠️  backbone.layer3.20.bn1: Activation has large mean (mean=1222180093461965639254016.0000)
+⚠️  backbone.layer3.20.relu: Activation has large mean (mean=10032547689020082144411648.0000)
+⚠️  backbone.layer3.20.conv2: Activation has large mean (mean=81194352846749122428928.0000)
+⚠️  backbone.layer3.20.bn2: Activation has large mean (mean=3197108690119640855085056.0000)
+⚠️  backbone.layer3.20.conv3: Activation has large mean (mean=-11158769206919295926272.0000)
+⚠️  backbone.layer3.20.bn3: Activation has large mean (mean=10032547689020082144411648.0000)
+⚠️  backbone.layer3.21.conv1: Activation has large mean (mean=-1646342509080210007130112.0000)
+⚠️  backbone.layer3.21.bn1: Activation has large mean (mean=5591087071983381375877120.0000)
+⚠️  backbone.layer3.21.relu: Activation has large mean (mean=49784736988913991445118976.0000)
+⚠️  backbone.layer3.21.conv2: Activation has large mean (mean=512855874334114688532480.0000)
+⚠️  backbone.layer3.21.bn2: Activation has large mean (mean=16525440738534902370140160.0000)
+⚠️  backbone.layer3.21.conv3: Activation has large mean (mean=-219481162428847193325568.0000)
+⚠️  backbone.layer3.21.bn3: Activation has large mean (mean=49784736988913991445118976.0000)
+⚠️  backbone.layer3.22.conv1: Activation has large mean (mean=15348503878987094771630080.0000)
+⚠️  backbone.layer3.22.bn1: Activation has large mean (mean=28865555054418065702780928.0000)
+⚠️  backbone.layer3.22.relu: Activation has large mean (mean=207303310861983149939752960.0000)
+⚠️  backbone.layer3.22.conv2: Activation has large mean (mean=-3904305841129086211063808.0000)
+⚠️  backbone.layer3.22.bn2: Activation has large mean (mean=68038108456184864258916352.0000)
+⚠️  backbone.layer3.22.conv3: Activation has large mean (mean=-1015099250333511426506752.0000)
+⚠️  backbone.layer3.22.bn3: Activation has large mean (mean=207303310861983149939752960.0000)
+⚠️  backbone.layer4.0.conv1: Activation has large mean (mean=-11630289368534342820691968.0000)
+⚠️  backbone.layer4.0.bn1: Activation has large mean (mean=147868445635441149064773632.0000)
+⚠️  backbone.layer4.0.relu: Activation has large mean (mean=1809006963621651090006605824.0000)
+⚠️  backbone.layer4.0.conv2: Activation has large mean (mean=-16903421442134238723833856.0000)
+⚠️  backbone.layer4.0.bn2: Activation has large mean (mean=485000688381327108514775040.0000)
+⚠️  backbone.layer4.0.conv3: Activation has large mean (mean=-12105680410057911675387904.0000)
+⚠️  backbone.layer4.0.bn3: Activation has large mean (mean=1809006963621651090006605824.0000)
+⚠️  backbone.layer4.0.downsample.0: Activation has large mean (mean=-15386349680297319130464256.0000)
+⚠️  backbone.layer4.0.downsample.1: Activation has large mean (mean=-16700350459998807124869120.0000)
+⚠️  backbone.layer4.1.conv1: Activation has large mean (mean=-200116846752491456530743296.0000)
+⚠️  backbone.layer4.1.bn1: Activation has large mean (mean=3993510536945440584357642240.0000)
+⚠️  backbone.layer4.1.relu: Activation has large mean (mean=55923340589700432899696754688.0000)
+⚠️  backbone.layer4.1.conv2: Activation has large mean (mean=-440252318352905446270959616.0000)
+⚠️  backbone.layer4.1.bn2: Activation has large mean (mean=13926934056389634094455062528.0000)
+⚠️  backbone.layer4.1.conv3: Activation has large mean (mean=-8234249549171937402421248.0000)
+⚠️  backbone.layer4.1.bn3: Activation has large mean (mean=55923340589700432899696754688.0000)
+⚠️  backbone.layer4.2.conv1: Activation has large mean (mean=-16642155474228435437796458496.0000)
+⚠️  backbone.layer4.2.bn1: Activation has large mean (mean=98139001876444386462565138432.0000)
+⚠️  backbone.layer4.2.relu: Activation has large mean (mean=1372400546836105627426116075520.0000)
+⚠️  backbone.layer4.2.conv2: Activation has large mean (mean=5159364832461436442481000448.0000)
+⚠️  backbone.layer4.2.bn2: Activation has large mean (mean=381147487882869879200043499520.0000)
+⚠️  backbone.layer4.2.conv3: Activation has large mean (mean=-7895769605750770296839733248.0000)
+⚠️  backbone.layer4.2.bn3: Activation has large mean (mean=1372400546836105627426116075520.0000)
+⚠️  backbone.l4_reduce.0: Activation has large mean (mean=1155216872226610044361504718848.0000)
+⚠️  backbone.l4_reduce.1: Activation has large mean (mean=2795574769170206065560716836864.0000)
+⚠️  backbone.l3_reduce.0: Activation has large mean (mean=-44218533421764539647524864.0000)
+⚠️  backbone.l3_reduce.1: Activation has large mean (mean=137691579844160400243294208.0000)
+⚠️  backbone.smooth_p3.0: Activation has large mean (mean=-358824445950094573746123702272.0000)
+⚠️  backbone.smooth_p3.1: Activation has large mean (mean=2083967484053541027369063546880.0000)
+⚠️  backbone.l2_reduce.0: Activation has large mean (mean=7430581.5000)
+⚠️  backbone.l2_reduce.1: Activation has large mean (mean=30164586.0000)
+⚠️  backbone.smooth_p2.0: Activation has large mean (mean=338070514173315331046649102336.0000)
+⚠️  backbone.smooth_p2.1: Activation has large mean (mean=2366153891057895606528451280896.0000)
+⚠️  backbone.l1_reduce.0: Activation has large mean (mean=22.1091)
+⚠️  backbone.l1_reduce.1: Activation has large mean (mean=1589.1882)
+⚠️  backbone.l2_to_p1.0: Activation has large mean (mean=-220789730324212638585532186624.0000)
+⚠️  backbone.l2_to_p1.1: Activation has large mean (mean=2993767276963647987091222036480.0000)
+⚠️  backbone.smooth_p1.0: Activation has large mean (mean=-530615713895086827173322948608.0000)
+⚠️  backbone.smooth_p1.1: Activation has large mean (mean=2701242589697131454715687600128.0000)
+⚠️  backbone.fuse.0: Activation has large mean (mean=-107957944607019233315980836864.0000)
+⚠️  backbone.fuse.1: Activation has large mean (mean=3223534207082329889749409464320.0000)
+⚠️  backbone.se.fc.0: Activation has large mean (mean=1917633042805766169336356012032.0000)
+⚠️  backbone.se.fc.2: Activation has large mean (mean=71749057928621742550610345984.0000)
+⚠️  length_head.2: Activation has large mean (mean=973412940633182665494933536768.0000)
+⚠️  length_head.5: Activation has large mean (mean=-1034500717876947136836070801408.0000)
+✅ pre_head_comm.pos_proj.0: mean=0.0002, std=0.1379
+✅ pre_head_comm.pos_proj.1: mean=0.0628, std=0.0951
+⚠️  pre_head_comm.comm_conv.0: Activation has large mean (mean=-33725202889213788126856609792.0000)
+⚠️  pre_head_comm.comm_conv.1: Activation has large mean (mean=2408418542174532849790766546944.0000)
+⚠️  heads.0.norm_input: Activation has large mean (mean=3458372278782840258138195623936.0000)
+⚠️  heads.0.attention_conv.0: Activation has large mean (mean=1441248246549599778697641984.0000)
+⚠️  heads.0.attention_conv.1: Activation has large mean (mean=83435583266375945214557683712.0000)
+⚠️  heads.0.attention_conv.3: Activation has large mean (mean=12595008298770561423101657088.0000)
+⚠️  heads.0.attention_conv.4: Activation has large mean (mean=218108162851114007768806195200.0000)
+⚠️  heads.0.attention_conv.6: Activation has large mean (mean=-20518540697074122364152709120.0000)
+⚠️  heads.0.attention_conv.7: Activation has large mean (mean=305097421343179018399574392832.0000)
+⚠️  heads.0.attention_conv.9: Activation has large mean (mean=-379525373885470087547719778304.0000)
+⚠️  heads.0.feat_proj.0: Activation has large mean (mean=-18670685240921376358924288.0000)
+⚠️  heads.0.cls_layer: Activation has large mean (mean=861308216952945784748244992.0000)
+⚠️  heads.0.bbox_head.0: Activation has large mean (mean=-3685913973349310374346752.0000)
+⚠️  heads.0.bbox_head.3: Activation has large mean (mean=172738742600613951308824576.0000)
+⚠️  heads.1.norm_input: Activation has large mean (mean=3458372278782840258138195623936.0000)
+⚠️  heads.1.attention_conv.0: Activation has large mean (mean=24542436120561966963226574848.0000)
+⚠️  heads.1.attention_conv.1: Activation has large mean (mean=86381839380839419645511335936.0000)
+⚠️  heads.1.attention_conv.3: Activation has large mean (mean=25881408829565101862650118144.0000)
+⚠️  heads.1.attention_conv.4: Activation has large mean (mean=240778808735960382067615727616.0000)
+⚠️  heads.1.attention_conv.6: Activation has large mean (mean=33300430746446146409529868288.0000)
+⚠️  heads.1.attention_conv.7: Activation has large mean (mean=307491113355481915644073476096.0000)
+⚠️  heads.1.attention_conv.9: Activation has large mean (mean=116017191915082364273416994816.0000)
+⚠️  heads.1.feat_proj.0: Activation has large mean (mean=-49943249860739377622155264.0000)
+⚠️  heads.1.cls_layer: Activation has large mean (mean=-94715148711227056399056896.0000)
+⚠️  heads.1.bbox_head.0: Activation has large mean (mean=38271512964114418652676096.0000)
+⚠️  heads.1.bbox_head.3: Activation has large mean (mean=-844889212774794681884082176.0000)
+⚠️  heads.2.norm_input: Activation has large mean (mean=3744486939122305122972144238592.0000)
+⚠️  heads.2.attention_conv.0: Activation has large mean (mean=-28022107141097982169293258752.0000)
+⚠️  heads.2.attention_conv.1: Activation has large mean (mean=89486304217211992930414231552.0000)
+⚠️  heads.2.attention_conv.3: Activation has large mean (mean=-41890394128136858139839430656.0000)
+⚠️  heads.2.attention_conv.4: Activation has large mean (mean=204106497345132961538844393472.0000)
+⚠️  heads.2.attention_conv.6: Activation has large mean (mean=-11773745085509563576221696000.0000)
+⚠️  heads.2.attention_conv.7: Activation has large mean (mean=274306685180504220634395443200.0000)
+⚠️  heads.2.attention_conv.9: Activation has large mean (mean=1122598542456132830941463707648.0000)
+⚠️  heads.2.feat_proj.0: Activation has large mean (mean=-13218899909732117268922368.0000)
+⚠️  heads.2.cls_layer: Activation has large mean (mean=-33058389301907804527788032.0000)
+⚠️  heads.2.bbox_head.0: Activation has large mean (mean=2761607579733964298911744.0000)
+⚠️  heads.2.bbox_head.3: Activation has large mean (mean=-709203006149003357561290752.0000)
+✅ head_interaction.ffn.0: mean=nan, std=nan
+✅ head_interaction.ffn.3: mean=nan, std=nan
+✅ head_fc.0: mean=nan, std=nan
+✅ head_fc.1: mean=nan, std=nan
+✅ head_fc.2: mean=nan, std=nan
+⚠️  roi_cnn.0.0: Activation has large mean (mean=10539306680971231143248527360.0000)
+⚠️  roi_cnn.0.1: Activation has large mean (mean=2722938274687390493542258311168.0000)
+⚠️  roi_cnn.0.3: Activation has large mean (mean=41288122396377595067865497600.0000)
+⚠️  roi_cnn.0.4: Activation has large mean (mean=2589374638979091744034251603968.0000)
+⚠️  roi_cnn.0.8: Activation has large mean (mean=-290670402843352937485924564992.0000)
+⚠️  roi_cls_heads.0: Activation has large mean (mean=1091059632326844029545788473344.0000)
+⚠️  roi_cnn.1.0: Activation has large mean (mean=-120551315425211859689604644864.0000)
+⚠️  roi_cnn.1.1: Activation has large mean (mean=1424809294505129224093390864384.0000)
+⚠️  roi_cnn.1.3: Activation has large mean (mean=-220117246447586069628521021440.0000)
+⚠️  roi_cnn.1.4: Activation has large mean (mean=1323221142262727608941775159296.0000)
+⚠️  roi_cnn.1.8: Activation has large mean (mean=-76907738017943162894535360512.0000)
+⚠️  roi_cls_heads.1: Activation has large mean (mean=-171091186558639794263559241728.0000)
+⚠️  roi_cnn.2.0: Activation has large mean (mean=287367088599119689180363358208.0000)
+⚠️  roi_cnn.2.1: Activation has large mean (mean=1639186296708661993700274995200.0000)
+⚠️  roi_cnn.2.3: Activation has large mean (mean=210049992242608971090478759936.0000)
+⚠️  roi_cnn.2.4: Activation has large mean (mean=1668448346172434092874037985280.0000)
+⚠️  roi_cnn.2.8: Activation has large mean (mean=32166271794171550892669534208.0000)
+⚠️  roi_cls_heads.2: Activation has large mean (mean=524980986207726766504340881408.0000)
+
+  Activation Statistics Summary:
+    Total neurons: 480,903,156
+    Dead neurons (zero activation): 76,157,623 (15.84%)
+
+============================================================
+4. Attention Gradient Check
+============================================================
+  Added attention supervision loss: 0.0005
+
+  Attention Map Gradient Analysis:
+    Head 0:
+      grad_norm=3.2178, grad_mean=-0.0001
+      ✅ OK
+    Head 1:
+      grad_norm=3.2401, grad_mean=0.0004
+      ✅ OK
+    Head 2:
+      grad_norm=2.8839, grad_mean=-0.0005
+      ✅ OK
+
+============================================================
+5. Loss Function Gradient Contribution
+============================================================
+
+  🔴 原始梯度范数（未应用补偿因子）:
+    classification: 3.9353e+02
+    bbox: 1.1135e+00
+    length: 1.4579e-01
+
+  🔴 原始梯度平衡分析:
+    ✅ classification: balanced (ratio=1.00)
+    ⚠️  bbox: gradient too weak (ratio=0.00)
+    ⚠️  length: gradient too weak (ratio=0.00)
+
+  🟢 应用补偿因子后的梯度范数:
+    BBox补偿因子: 50.0x
+    Length补偿因子: 200.0x
+    classification: 3.9353e+02
+    bbox: 5.5677e+01
+    length: 2.9158e+01
+
+  🟢 补偿后梯度平衡分析:
+    ✅ classification: balanced (ratio=1.00)
+    ✅ bbox: balanced (ratio=0.14)
+    ⚠️  length: gradient too weak (ratio=0.07)
+
+============================================================
+6. Loss Function Check
+============================================================
+
+Testing FocalLoss:
+   FocalLoss output: 3.0650
+   ✅ FocalLoss produces finite values
+
+Testing LabelSmoothEntropy:
+   LabelSmoothEntropy output: 3.2720
+   ✅ LabelSmoothEntropy produces finite values
+
+============================================================
+7. Optimizer Setup Check
+============================================================
+   Backbone params: 341
+   Other params: 146
+   Total params: 487
+
+   Configured LR: 0.0003
+   Backbone LR factor: 0.3
+   Backbone effective LR: 8.999999999999999e-05
+   ✅ Gradient clipping threshold: 2.0 (appropriate)
+
+   Mixed Precision Settings:
+     use_amp: True
+     use_bf16: False
+     ✅ Using FP16 (safer for gradient stability)
+
+============================================================
+Diagnostic Complete!
+Output saved to: D:\HuaweiMoveData\Users\官海峰\Desktop\2026春\人工智能\Project1-街景字符识别\Street_Character_Recognition\gradient_diagnostic_output.txt
+============================================================

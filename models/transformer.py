@@ -37,14 +37,14 @@ class TransformerDigitsModel(nn.Module):
         
         self.cls_head = nn.Sequential(
             nn.Linear(feat_dim, feat_dim // 2),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Dropout(config.dropout),
             nn.Linear(feat_dim // 2, class_num)
         )
         
         self.bbox_head = nn.Sequential(
             nn.Linear(feat_dim, feat_dim // 4),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Linear(feat_dim // 4, 4),
             nn.Sigmoid()
         )

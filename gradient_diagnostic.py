@@ -7,13 +7,46 @@
 import sys
 import os
 import io
+import datetime
+
+
+class Tee:
+    def __init__(self, *streams):
+        self.streams = list(streams)
+
+    def write(self, data):
+        for s in self.streams:
+            try:
+                s.write(data)
+                s.flush()
+            except (ValueError, OSError):
+                pass
+
+    def flush(self):
+        for s in self.streams:
+            try:
+                s.flush()
+            except (ValueError, OSError):
+                pass
+
+    def remove_stream(self, stream):
+        if stream in self.streams:
+            self.streams.remove(stream)
+
+
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, List, Tuple, Optional
 import warnings
-warnings.filterwarnings('ignore')
+
+_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gradient_diagnostic_output.txt')
+_log_file = open(_log_path, 'w', encoding='utf-8')
+sys.stdout = Tee(sys.stdout, _log_file)
+
+warnings.simplefilter('always')
+warnings.filterwarnings('default')
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -344,14 +377,40 @@ class GradientDiagnostic:
             
             loss_grad_norms[loss_type] = (grad_norm_sum ** 0.5) / max(param_count, 1)
         
-        print("\n  Average Gradient Norms per Loss Type:")
+        print("\n  🔴 原始梯度范数（未应用补偿因子）:")
         for loss_type, avg_norm in loss_grad_norms.items():
             print(f"    {loss_type}: {avg_norm:.4e}")
         
         max_norm = max(loss_grad_norms.values())
-        print("\n  Gradient Balance Analysis:")
+        print("\n  🔴 原始梯度平衡分析:")
         for loss_type, avg_norm in loss_grad_norms.items():
             ratio = avg_norm / max_norm
+            if ratio < 0.1:
+                print(f"    ⚠️  {loss_type}: gradient too weak (ratio={ratio:.2f})")
+            elif ratio > 10:
+                print(f"    ⚠️  {loss_type}: gradient too strong (ratio={ratio:.2f})")
+            else:
+                print(f"    ✅ {loss_type}: balanced (ratio={ratio:.2f})")
+
+        bbox_compensation = getattr(config, 'gradient_balance', {}).get('bbox_norm_factor', 50.0)
+        length_compensation = getattr(config, 'gradient_balance', {}).get('length_norm_factor', 200.0)
+        
+        compensated_grad_norms = {
+            'classification': loss_grad_norms['classification'],
+            'bbox': loss_grad_norms['bbox'] * bbox_compensation,
+            'length': loss_grad_norms['length'] * length_compensation
+        }
+        
+        print("\n  🟢 应用补偿因子后的梯度范数:")
+        print(f"    BBox补偿因子: {bbox_compensation}x")
+        print(f"    Length补偿因子: {length_compensation}x")
+        for loss_type, avg_norm in compensated_grad_norms.items():
+            print(f"    {loss_type}: {avg_norm:.4e}")
+        
+        max_compensated = max(compensated_grad_norms.values())
+        print("\n  🟢 补偿后梯度平衡分析:")
+        for loss_type, avg_norm in compensated_grad_norms.items():
+            ratio = avg_norm / max_compensated
             if ratio < 0.1:
                 print(f"    ⚠️  {loss_type}: gradient too weak (ratio={ratio:.2f})")
             elif ratio > 10:
@@ -423,9 +482,10 @@ class GradientDiagnostic:
             print("     ✅ Using FP16 (safer for gradient stability)")
     
     def run_full_diagnostic(self):
-        """运行完整诊断"""
         print("="*60)
         print("Street Character Recognition - Gradient Diagnostic")
+        print(f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Output file: {_log_path}")
         print("="*60)
         
         print("\n[INFO] Creating model...")
@@ -453,13 +513,16 @@ class GradientDiagnostic:
         
         print("\n" + "="*60)
         print("Diagnostic Complete!")
+        print(f"Output saved to: {_log_path}")
         print("="*60)
 
 
 def main():
-    """主函数"""
     diagnostic = GradientDiagnostic()
     diagnostic.run_full_diagnostic()
+    if isinstance(sys.stdout, Tee):
+        sys.stdout.remove_stream(_log_file)
+    _log_file.close()
 
 
 if __name__ == '__main__':

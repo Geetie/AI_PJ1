@@ -183,7 +183,7 @@ class SEBlock(nn.Module):
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Sequential(
             nn.Linear(channels, mid, bias=False),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Linear(mid, channels, bias=False),
             nn.Sigmoid()
         )
@@ -206,52 +206,64 @@ class FPNBackbone(nn.Module):
         
         # 改进：增加layer1的特征融合，提供更细粒度的空间信息
         self.l1_reduce = nn.Sequential(
-            nn.Conv2d(256, 128, 1, bias=False),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, 1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.l2_reduce = nn.Sequential(
             nn.Conv2d(512, 256, 1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.l3_reduce = nn.Sequential(
             nn.Conv2d(1024, 256, 1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.l4_reduce = nn.Sequential(
             nn.Conv2d(2048, 256, 1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         
         # Smooth卷积用于减少上采样的棋盘效应
         self.smooth_p3 = nn.Sequential(
             nn.Conv2d(256, 256, 3, padding=1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.smooth_p2 = nn.Sequential(
             nn.Conv2d(256, 256, 3, padding=1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.smooth_p1 = nn.Sequential(
-            nn.Conv2d(128, 128, 3, padding=1, bias=False),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, 3, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         
-        # 改进：融合P1/P2/P3/P4四个尺度的特征
-        # P1: 128 channels, P2: 256, P3: 256, P4: 256 -> total 896
         self.fuse = nn.Sequential(
-            nn.Conv2d(896, config.multiscale_feat_dim, 3, padding=1, bias=False),
+            nn.Conv2d(256 * 4, config.multiscale_feat_dim, 3, padding=1, bias=False),
             nn.BatchNorm2d(config.multiscale_feat_dim),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.se = SEBlock(config.multiscale_feat_dim)
         self.use_checkpoint = True
+        self._reset_batch_norm_stats()
+
+    def _reset_batch_norm_stats(self):
+        fpn_prefixes = (
+            'l1_reduce', 'l2_reduce', 'l3_reduce', 'l4_reduce',
+            'smooth_p3', 'smooth_p2', 'smooth_p1', 'fuse',
+        )
+        for name, m in self.named_modules():
+            if isinstance(m, nn.BatchNorm2d):
+                is_fpn = any(name.startswith(prefix) for prefix in fpn_prefixes)
+                if is_fpn:
+                    m.running_mean.fill_(0)
+                    m.running_var.fill_(1)
+                    m.num_batches_tracked.zero_()
 
     def _forward_early(self, x):
         """
@@ -486,13 +498,13 @@ class PositionAwareAttentionHead(nn.Module):
             nn.Conv2d(in_channels + config.pos_embed_channels * 2, in_channels + config.pos_embed_channels * 2, 3,
                       padding=1, groups=in_channels + config.pos_embed_channels * 2, bias=False),
             nn.BatchNorm2d(in_channels + config.pos_embed_channels * 2),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Conv2d(in_channels + config.pos_embed_channels * 2, 256, 1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Conv2d(256, 128, 3, padding=1, bias=False),
             nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Conv2d(128, self.num_attn_channels, 1),
         )
         self.attn_pool = nn.AdaptiveAvgPool2d(4)
@@ -500,7 +512,7 @@ class PositionAwareAttentionHead(nn.Module):
         self.feat_proj = nn.Sequential(
             nn.Linear(pool_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Dropout(config.dropout),
         )
         self.cls_layer = nn.Linear(hidden_dim, num_classes)
@@ -508,7 +520,7 @@ class PositionAwareAttentionHead(nn.Module):
         self.bbox_head = nn.Sequential(
             nn.Linear(in_channels * 4 * 4, hidden_dim // 2),
             nn.BatchNorm1d(hidden_dim // 2),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Linear(hidden_dim // 2, 4),
             nn.Sigmoid()
         )
@@ -648,7 +660,7 @@ class CrossHeadCommLayer(nn.Module):
         self.comm_conv = nn.Sequential(
             nn.Conv2d(feat_dim + 32 * num_heads, feat_dim, 1, bias=False),
             nn.BatchNorm2d(feat_dim),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
 
     def forward(self, feat, pos_embeds):
@@ -680,15 +692,15 @@ class DigitsResnet101(nn.Module):
                 nn.Sequential(
                     nn.Conv2d(config.multiscale_feat_dim, config.roi_feat_dim, 3, padding=1, bias=False),
                     nn.BatchNorm2d(config.roi_feat_dim),
-                    nn.ReLU(inplace=True),
+                    nn.LeakyReLU(0.01, inplace=True),
                     nn.Conv2d(config.roi_feat_dim, config.roi_feat_dim, 3, padding=1, bias=False),
                     nn.BatchNorm2d(config.roi_feat_dim),
-                    nn.ReLU(inplace=True),
+                    nn.LeakyReLU(0.01, inplace=True),
                     nn.AdaptiveAvgPool2d(1),
                     nn.Flatten(),
                     nn.Linear(config.roi_feat_dim, config.roi_feat_dim),
                     nn.BatchNorm1d(config.roi_feat_dim),
-                    nn.ReLU(inplace=True),
+                    nn.LeakyReLU(0.01, inplace=True),
                     nn.Dropout(config.dropout),
                 ) for _ in range(num_heads)
             ])
@@ -704,6 +716,14 @@ class DigitsResnet101(nn.Module):
         self.head_fc = nn.ModuleList([
             nn.Linear(config.fc_hidden, class_num) for _ in range(num_heads)
         ])
+        self.length_head = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(config.multiscale_feat_dim, 64),
+            nn.LeakyReLU(0.01, inplace=True),
+            nn.Dropout(config.dropout),
+            nn.Linear(64, num_heads + 1),
+        )
 
     def _extract_roi_feat(self, feat, bbox_pred, head_idx):
         """
@@ -774,42 +794,56 @@ class DigitsResnet101(nn.Module):
 
     def forward(self, img, gt_bboxes=None):
         feat = self.backbone(img)
+        length_logits = self.length_head(feat)
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         results = [head(feat) for head in self.heads]
+        head_cls_outs = tuple(r[0] for r in results)
         bbox_outs = tuple(r[1] for r in results)
         head_feats = [r[2] for r in results]
         interacted = self.head_interaction(head_feats)
-        cls_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        fc_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        cls_outs = tuple(fc_outs[h] + head_cls_outs[h] for h in range(self.num_heads))
         cls_outs = self._apply_roi_refine(feat, cls_outs, bbox_outs, gt_bboxes)
-        return cls_outs, bbox_outs
+        return cls_outs, bbox_outs, length_logits
 
     def forward_with_attn(self, img, gt_bboxes=None):
         feat = self.backbone(img)
+        length_logits = self.length_head(feat)
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
-        cls_outs, bbox_outs, attn_maps = [], [], []
+        head_cls_outs, bbox_outs, attn_maps = [], [], []
         head_feats = []
         for head in self.heads:
             cls_out, bbox_out, hidden, attn = head(feat, return_attn=True)
-            cls_outs.append(cls_out)
+            head_cls_outs.append(cls_out)
             bbox_outs.append(bbox_out)
             head_feats.append(hidden)
             attn_maps.append(attn)
         bbox_tuple = tuple(bbox_outs)
         interacted = self.head_interaction(head_feats)
-        cls_list = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        fc_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        cls_list = tuple(fc_outs[h] + head_cls_outs[h] for h in range(self.num_heads))
         cls_list = self._apply_roi_refine(feat, cls_list, bbox_tuple, gt_bboxes)
-        return cls_list, bbox_tuple, attn_maps
+        return cls_list, bbox_tuple, attn_maps, tuple(head_cls_outs), length_logits
 
     def forward_with_probs(self, img):
         feat = self.backbone(img)
+        length_logits = self.length_head(feat)
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         results = [head(feat) for head in self.heads]
+        head_cls_outs = tuple(r[0] for r in results)
         bbox_outs = tuple(r[1] for r in results)
         head_feats = [r[2] for r in results]
         interacted = self.head_interaction(head_feats)
-        cls_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        fc_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        cls_outs = tuple(fc_outs[h] + head_cls_outs[h] for h in range(self.num_heads))
         cls_outs = self._apply_roi_refine(feat, cls_outs, bbox_outs)
-        return tuple(F.softmax(c, dim=1) for c in cls_outs)
+        probs = [F.softmax(c.float(), dim=1).to(c.dtype) for c in cls_outs]
+        pred_length = length_logits.argmax(dim=1)
+        for h in range(self.num_heads):
+            mask = (pred_length <= h).unsqueeze(1).expand_as(probs[h])
+            probs[h] = probs[h].masked_fill(mask, 0.0)
+            probs[h][:, 10] = probs[h][:, 10].masked_fill(mask[:, 10], 1.0)
+        return tuple(probs)
 
 
 class TransformerDigitsModel(nn.Module):
@@ -828,13 +862,13 @@ class TransformerDigitsModel(nn.Module):
         self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=config.transformer_layers)
         self.cls_head = nn.Sequential(
             nn.Linear(feat_dim, feat_dim // 2),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Dropout(config.dropout),
             nn.Linear(feat_dim // 2, class_num)
         )
         self.bbox_head = nn.Sequential(
             nn.Linear(feat_dim, feat_dim // 4),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Linear(feat_dim // 4, 4),
             nn.Sigmoid()
         )
@@ -881,22 +915,28 @@ class TransformerDigitsModel(nn.Module):
         decoded = self.decoder(queries, memory, tgt_mask=None)
         cls_outs = tuple(self.cls_head(decoded[:, i, :]) for i in range(self.num_heads))
         bbox_outs = tuple(self.bbox_head(decoded[:, i, :]) for i in range(self.num_heads))
-        return cls_outs, bbox_outs
+        return cls_outs, bbox_outs, t.zeros(B, self.num_heads + 1, device=feat.device)
 
     def forward_with_attn(self, img, gt_bboxes=None):
         feat = self.backbone(img)
         memory, H, W = self._prepare_memory(feat)
         B = feat.shape[0]
         queries = self.query_embed.unsqueeze(0).expand(B, -1, -1)
-        # 修复：移除causal mask以支持双向attention
         decoded, attn_maps = self._decode_with_attn(queries, memory, tgt_mask=None, H_feat=H, W_feat=W)
         cls_outs = tuple(self.cls_head(decoded[:, i, :]) for i in range(self.num_heads))
         bbox_outs = tuple(self.bbox_head(decoded[:, i, :]) for i in range(self.num_heads))
-        return cls_outs, bbox_outs, attn_maps if attn_maps else None
+        length_logits = t.zeros(B, self.num_heads + 1, device=feat.device)
+        return cls_outs, bbox_outs, attn_maps if attn_maps else None, cls_outs, length_logits
 
     def forward_with_probs(self, img):
-        cls_outs, _ = self.forward(img)
-        return tuple(F.softmax(c, dim=1) for c in cls_outs)
+        cls_outs, _, length_logits = self.forward(img)
+        probs = [F.softmax(c.float(), dim=1).to(c.dtype) for c in cls_outs]
+        pred_length = length_logits.argmax(dim=1)
+        for h in range(self.num_heads):
+            mask = (pred_length <= h).unsqueeze(1).expand_as(probs[h])
+            probs[h] = probs[h].masked_fill(mask, 0.0)
+            probs[h][:, 10] = probs[h][:, 10].masked_fill(mask[:, 10], 1.0)
+        return tuple(probs)
 
 
 def create_model(model_type=None):
@@ -1292,7 +1332,7 @@ class Trainer:
             self.optimizer.zero_grad()
 
             with autocast('cuda', enabled=self.use_amp, dtype=t.bfloat16 if self.use_bf16 else t.float16):
-                pred, pred_bboxes, attn_maps = self.model.forward_with_attn(img, gt_bboxes=bbox_target)
+                pred, pred_bboxes, attn_maps, head_cls_outs, length_logits = self.model.forward_with_attn(img, gt_bboxes=bbox_target)
                 
                 # 动态掩码：根据bbox_mask计算每个样本的真实长度
                 true_lengths = bbox_mask.sum(dim=1).long()  # [B]
@@ -1349,6 +1389,18 @@ class Trainer:
                         + dynamic_ordering_weight * ord_loss
                         + dynamic_attn_weight * attn_sup_loss)
 
+                if length_logits is not None:
+                    length_loss = F.cross_entropy(length_logits, true_lengths.clamp(max=config.num_heads))
+                    loss = loss + 0.1 * length_loss
+
+                if head_cls_outs is not None:
+                    aux_loss = t.tensor(0.0, device=self.device)
+                    for h in range(config.num_heads):
+                        valid_mask = (true_lengths > h).float()
+                        if valid_mask.sum() > 0:
+                            aux_loss = aux_loss + (self.head_criteria[h](head_cls_outs[h], label[:, h]) * valid_mask).sum() / valid_mask.sum()
+                    loss = loss + config.aux_loss_weight * aux_loss
+
             self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.optimizer)
             t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
@@ -1399,7 +1451,7 @@ class Trainer:
                 img = img.to(self.device)
                 label = label.to(self.device)
                 bbox_mask = bbox_mask.to(self.device)
-                pred_cls, _ = model(img)
+                pred_cls, _, _ = model(img)
                 
                 if config.use_char_level_acc:
                     # 字符级准确率：只计算有效字符位置
@@ -1442,7 +1494,7 @@ class Trainer:
                 img = img.to(self.device)
                 label = label.to(self.device)
                 bbox_mask = bbox_mask.to(self.device)
-                pred_cls, _ = model(img)
+                pred_cls, _, _ = model(img)
                 
                 true_lengths = bbox_mask.sum(dim=1).long()
                 
@@ -1645,7 +1697,7 @@ def predicts(model_path, csv_path, use_tta=True, model_type=None):
         with t.no_grad():
             for img, img_names in tqdm(test_loader):
                 img = img.to(device)
-                pred_cls, _ = res_net(img)
+                pred_cls, _, _ = res_net(img)
                 results += [[name, code] for name, code in zip(img_names, parse2class(pred_cls))]
 
     results = sorted(results, key=lambda x: x[0])
@@ -1815,50 +1867,49 @@ class CTCModel(nn.Module):
         
         # 改进：增加layer1特征融合，使用bilinear上采样
         self.l1_reduce = nn.Sequential(
-            nn.Conv2d(256, 64, 1, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 128, 1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.l2_reduce = nn.Sequential(
             nn.Conv2d(512, 128, 1, bias=False),
             nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.l3_reduce = nn.Sequential(
             nn.Conv2d(1024, 128, 1, bias=False),
             nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.l4_reduce = nn.Sequential(
             nn.Conv2d(2048, 128, 1, bias=False),
             nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         
         # Smooth卷积
         self.smooth_p2 = nn.Sequential(
             nn.Conv2d(128, 128, 3, padding=1, bias=False),
             nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.smooth_p1 = nn.Sequential(
-            nn.Conv2d(64, 64, 3, padding=1, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 128, 3, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         
-        # 融合P1/P2/P3/P4: 64+128+128+128 = 448
         self.fuse = nn.Sequential(
-            nn.Conv2d(448, 256, 3, padding=1, bias=False),
+            nn.Conv2d(128 * 4, 256, 3, padding=1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.height_pool = nn.AdaptiveAvgPool2d((1, None))
         self.lstm = nn.LSTM(256, 256, num_layers=2, bidirectional=True, dropout=0.2)
         self.fc = nn.Sequential(
             nn.Linear(512, 256),
             nn.LayerNorm(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Dropout(0.1),
             nn.Linear(256, num_classes)
         )

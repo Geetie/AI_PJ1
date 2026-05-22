@@ -78,33 +78,76 @@ class MultiHeadTrainer(BaseTrainer):
 
         self.model = create_model(self._model_type).to(self.device)
 
+        raw_model_for_bn = self.model
+        if hasattr(raw_model_for_bn, 'setup_bn_protection'):
+            self._bn_protection = raw_model_for_bn.setup_bn_protection(
+                warmup_epochs=config.warmup_epochs,
+                freeze_epochs=0,
+                bn_grad_max_norm=1.0,
+                auto_fix=True,
+            )
+            self.logger.logger.info('[BN-PROT] BN protection installed: grad_clip=1.0, warmup=%d epochs',
+                                    config.warmup_epochs)
+
         self._loaded_from_checkpoint = False
         self._optimizer_state_lost = False
         self._nan_skip_count = 0
         self._nan_skip_threshold = 3
         self._nan_lr_reduced = False
         
-        # 损失权重缓存
         self._loss_weight_history = []
+        self._bn_protection = None
 
     def _compute_adaptive_loss_weights(self, epoch):
-        """计算自适应损失权重，平衡各损失项的梯度贡献"""
+        """计算自适应损失权重，平衡各损失项的梯度贡献
+
+        关键修复：根据诊断结果，Classification梯度是BBox的242倍，是Length的1854倍。
+        原有实现未考虑不同损失函数的固有梯度幅度差异，导致多任务学习失衡。
+        现使用保守的梯度补偿因子，在避免梯度爆炸的同时逐步平衡各任务的学习。
+        """
         base_epoch = config.warmup_epochs
+
+        if not config.gradient_balance.get('enabled', True):
+            if epoch < base_epoch:
+                return {'cls': 1.0, 'bbox': 0.3, 'div': 0.5, 'ord': 0.3, 'attn': 0.3, 'aux': 0.5, 'length': 0.5}
+            progress = min((epoch - base_epoch) / (config.epoches - base_epoch), 1.0)
+            return {
+                'cls': 1.0,
+                'bbox': 0.3 + 0.7 * progress,
+                'div': 0.5 + 0.5 * progress,
+                'ord': 0.3 + 0.7 * progress,
+                'attn': 0.3 + 0.7 * progress,
+                'aux': 0.5 + 0.5 * progress,
+                'length': 0.5 + 2.5 * progress
+            }
+
+        bbox_compensation = config.gradient_balance.get('bbox_norm_factor', 50.0)
+        length_compensation = config.gradient_balance.get('length_norm_factor', 200.0)
+
         if epoch < base_epoch:
-            return {'cls': 1.0, 'bbox': 0.3, 'div': 0.5, 'ord': 0.3, 'attn': 0.3, 'aux': 0.5, 'length': 0.5}
-        
-        progress = min((epoch - base_epoch) / (config.epoches - base_epoch), 1.0)
-        # 使用余弦退火调整损失权重
+            warmup_factor = epoch / max(base_epoch, 1)
+            return {
+                'cls': 0.5 + 0.5 * warmup_factor,
+                'bbox': bbox_compensation * (0.3 + 0.2 * warmup_factor),
+                'div': 0.5,
+                'ord': bbox_compensation * (0.2 + 0.1 * warmup_factor),
+                'attn': bbox_compensation * (0.2 + 0.1 * warmup_factor),
+                'aux': 0.3 + 0.2 * warmup_factor,
+                'length': length_compensation * (0.2 + 0.1 * warmup_factor),
+            }
+
+        transition_epochs = 30
+        progress = min((epoch - base_epoch) / transition_epochs, 1.0)
         cos_factor = 0.5 * (1 + t.cos(t.tensor(progress * t.pi)))
-        
+
         return {
             'cls': 1.0,
-            'bbox': 0.3 + 0.7 * progress,
+            'bbox': bbox_compensation * (0.3 + 0.7 * cos_factor),
             'div': 0.5 + 0.5 * cos_factor,
-            'ord': 0.3 + 0.7 * progress,
-            'attn': 0.3 + 0.7 * progress,
-            'aux': 0.5 + 0.5 * progress,
-            'length': 0.5 + 2.5 * progress
+            'ord': bbox_compensation * (0.2 + 0.8 * cos_factor),
+            'attn': bbox_compensation * (0.2 + 0.8 * cos_factor),
+            'aux': 0.3 + 0.7 * cos_factor,
+            'length': length_compensation * (0.2 + 0.8 * cos_factor),
         }
 
         if config.pretrained is not None:
@@ -500,14 +543,20 @@ class MultiHeadTrainer(BaseTrainer):
         self._nan_lr_reduced = False
         self._nan_skip_count = 0
 
+        if self._bn_protection is not None:
+            momentum = self._bn_protection['momentum_scheduler'].step(epoch, config.epoches)
+            self._bn_protection['safe_wrapper'].step(epoch)
+            if epoch < 3 or epoch % 10 == 0:
+                self.logger.logger.info('[BN-PROT] epoch=%d momentum=%.4f', epoch + 1, momentum)
+
         raw_model = self._get_raw_model()
         if hasattr(raw_model, 'set_roi_gt_prob'):
             if epoch < config.warmup_epochs:
                 raw_model.set_roi_gt_prob(1.0)
             else:
-                decay_end = int(config.epoches * 0.8)
+                decay_end = int(config.epoches * config.roi_gt_decay_end_ratio)
                 if epoch >= decay_end:
-                    raw_model.set_roi_gt_prob(0.0)
+                    raw_model.set_roi_gt_prob(0.1)
                 else:
                     progress = (epoch - config.warmup_epochs) / max(decay_end - config.warmup_epochs, 1)
                     import math
@@ -756,6 +805,8 @@ class MultiHeadTrainer(BaseTrainer):
                         self._nan_skip_count = 0
                 else:
                     self._nan_skip_count = 0
+                    if self._bn_protection is not None:
+                        self._bn_protection['grad_cliper'].clip(self.model)
                     t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self._grad_clip_max_norm)
                     
                     if not self.use_amp or self.use_bf16:

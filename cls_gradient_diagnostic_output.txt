@@ -1,0 +1,240 @@
+============================================================
+Classification Layer Gradient Diagnostic
+Timestamp: 2026-05-22 19:46:42
+Output file: D:\HuaweiMoveData\Users\官海峰\Desktop\2026春\人工智能\Project1-街景字符识别\Street_Character_Recognition\cls_gradient_diagnostic_output.txt
+============================================================
+
+[INFO] Using device: cpu
+[INFO] Creating model...
+[INFO] Using dummy test data with batch_size=2...
+
+============================================================
+1. Forward Path Integrity Check
+============================================================
+
+  ⚠️  CRITICAL: Model forward pass produces NaN!
+  This is caused by BN stats reset leading to activation explosion.
+  The backbone._reset_batch_norm_stats() has been fixed to only reset FPN layers.
+  But the current model instance was created before or with the old code.
+
+  [forward()] Output shapes:
+    cls_outs[0]: shape=torch.Size([2, 11]), ❌ NaN=100.0%
+    cls_outs[1]: shape=torch.Size([2, 11]), ❌ NaN=100.0%
+    cls_outs[2]: shape=torch.Size([2, 11]), ❌ NaN=100.0%
+    bbox_outs[0]: shape=torch.Size([2, 4]), mean=nan, std=nan
+    bbox_outs[1]: shape=torch.Size([2, 4]), mean=nan, std=nan
+    bbox_outs[2]: shape=torch.Size([2, 4]), mean=nan, std=nan
+    length_logits: shape=torch.Size([2, 4]), mean=nan
+
+  [forward_with_attn()] Output shapes:
+    cls_list[0]: shape=torch.Size([2, 11]), mean=nan, std=nan
+    cls_list[1]: shape=torch.Size([2, 11]), mean=nan, std=nan
+    cls_list[2]: shape=torch.Size([2, 11]), mean=nan, std=nan
+    head_cls_outs[0]: shape=torch.Size([2, 11]), mean=nan, std=nan
+    head_cls_outs[1]: shape=torch.Size([2, 11]), mean=nan, std=nan
+    head_cls_outs[2]: shape=torch.Size([2, 11]), mean=nan, std=nan
+
+  [Consistency Check] forward() vs forward_with_attn():
+    Head 0: max_diff=nan ⚠️
+    Head 1: max_diff=nan ⚠️
+    Head 2: max_diff=nan ⚠️
+
+  [ROI Refinement Check]:
+    ROI enabled: True
+    roi_gt_prob: 0.8
+
+  [head_fc vs cls_layer output comparison]:
+    Head 0:
+      head_fc output range: [nan, nan]
+      cls_layer output range: [nan, nan]
+    Head 1:
+      head_fc output range: [nan, nan]
+      cls_layer output range: [nan, nan]
+    Head 2:
+      head_fc output range: [nan, nan]
+      cls_layer output range: [nan, nan]
+
+============================================================
+2. Loss Function - Classification Layer Connection
+============================================================
+
+  [Main Classification Loss Path]:
+  Loss computed on: cls_list (head_fc output after ROI refine)
+
+  After main cls_loss.backward():
+  head_fc gradients:
+    head_fc.0.bias: 2.6103e-01
+    head_fc.0.weight: 8.2289e+00
+    head_fc.1.bias: 2.5076e-01
+    head_fc.1.weight: 7.8431e+00
+    head_fc.2.bias: 2.5721e-01
+    head_fc.2.weight: 8.2891e+00
+  cls_layer gradients:
+    heads.0.cls_layer.bias: 2.6103e-01
+    heads.0.cls_layer.weight: 1.5730e-01
+    heads.1.cls_layer.bias: 2.5076e-01
+    heads.1.cls_layer.weight: 1.5206e-01
+    heads.2.cls_layer.bias: 2.5721e-01
+    heads.2.cls_layer.weight: 1.6924e-01
+
+  [Auxiliary Loss Path]:
+  Testing aux_loss on head_cls_outs (cls_layer output)...
+  After aux_loss.backward() on head_cls_outs:
+    heads.0.cls_layer.bias: 2.1396e-01
+    heads.0.cls_layer.weight: 1.4281e-01
+    heads.1.cls_layer.bias: 2.1410e-01
+    heads.1.cls_layer.weight: 2.0374e-01
+    heads.2.cls_layer.bias: 2.1323e-01
+    heads.2.cls_layer.weight: 1.4169e-01
+
+  [LabelSmoothEntropy Gradient Test]:
+    Input grad norm: 7.3353e-01
+    ✅ LabelSmoothEntropy produces valid gradients
+
+============================================================
+3. Classification Layer Input Feature Distribution
+============================================================
+
+  Feature Distribution Analysis:
+    head_interaction_input: mean=1491005815652352.0000, std=2.3008e+15, range=[0.0000, 18125139946242048.0000], zero_ratio=50.78% ⚠️ (large mean)
+    head_interaction_output: mean=-0.0000, std=1.0001e+00, range=[-2.4093, 5.1284], zero_ratio=0.00% ✅
+    heads.0.cls_layer_input: mean=1247078785220608.0000, std=1.8344e+15, range=[0.0000, 11014606839349248.0000], zero_ratio=51.51% ⚠️ (large mean)
+    heads.0.cls_layer_output: mean=1378537265168384.0000, std=4.2316e+15, range=[-9077805295861760.0000, 10097785940475904.0000], zero_ratio=0.00% ⚠️ (large mean)
+    heads.0.feat_proj_input: mean=730458375585792.0000, std=1.9839e+15, range=[0.0000, 23195308036980736.0000], zero_ratio=17.98% ⚠️ (large mean)
+    heads.0.feat_proj_output: mean=1247078785220608.0000, std=1.8344e+15, range=[0.0000, 11014606839349248.0000], zero_ratio=51.51% ⚠️ (large mean)
+    heads.1.cls_layer_input: mean=1231950568226816.0000, std=1.8010e+15, range=[0.0000, 9454760616787968.0000], zero_ratio=49.85% ⚠️ (large mean)
+    heads.1.cls_layer_output: mean=-754824664580096.0000, std=2.5945e+15, range=[-5112239979757568.0000, 3471403558895616.0000], zero_ratio=0.00% ⚠️ (large mean)
+    heads.1.feat_proj_input: mean=849955237396480.0000, std=1.9401e+15, range=[0.0000, 18434203645378560.0000], zero_ratio=17.98% ⚠️ (large mean)
+    heads.1.feat_proj_output: mean=1231950568226816.0000, std=1.8010e+15, range=[0.0000, 9454760616787968.0000], zero_ratio=49.85% ⚠️ (large mean)
+    heads.2.cls_layer_input: mean=1993988093509632.0000, std=2.9830e+15, range=[0.0000, 18125139946242048.0000], zero_ratio=50.97% ⚠️ (large mean)
+    heads.2.cls_layer_output: mean=454346202415104.0000, std=3.7391e+15, range=[-6859031096328192.0000, 7170612183171072.0000], zero_ratio=0.00% ⚠️ (large mean)
+    heads.2.feat_proj_input: mean=923661036945408.0000, std=2.8816e+15, range=[0.0000, 39666406685409280.0000], zero_ratio=17.98% ⚠️ (large mean)
+    heads.2.feat_proj_output: mean=1993988093509632.0000, std=2.9830e+15, range=[0.0000, 18125139946242048.0000], zero_ratio=50.97% ⚠️ (large mean)
+
+  [Dead Neuron Check in feat_proj]:
+    Head 0 feat_proj: zero_ratio=51.51%
+    ⚠️  More than 50% dead neurons in head 0 feat_proj!
+    Head 1 feat_proj: zero_ratio=49.85%
+    Head 2 feat_proj: zero_ratio=50.97%
+    ⚠️  More than 50% dead neurons in head 2 feat_proj!
+
+============================================================
+4. Gradient Interruption Point Detection
+============================================================
+
+  [Head Interaction Layer Gradient Flow]:
+    head_interaction.self_attn.in_proj_weight: 4.8669e+00 ✅
+    head_interaction.self_attn.in_proj_bias: 4.4513e+00 ✅
+    head_interaction.self_attn.out_proj.weight: 5.8604e+00 ✅
+    head_interaction.self_attn.out_proj.bias: 6.0815e+00 ✅
+    head_interaction.norm1.weight: 2.1778e-01 ✅
+    head_interaction.norm1.bias: 2.1985e-01 ✅
+    head_interaction.norm2.weight: 2.2146e-01 ✅
+    head_interaction.norm2.bias: 2.1921e-01 ✅
+    head_interaction.ffn.0.weight: 3.9915e+00 ✅
+    head_interaction.ffn.0.bias: 1.2453e-01 ✅
+    head_interaction.ffn.3.weight: 7.7957e+00 ✅
+    head_interaction.ffn.3.bias: 2.7036e-01 ✅
+
+  [Gradient Interruption Analysis]:
+  Checking for gradient-blocking operations...
+
+  Head 0 - Smallest gradients (potential interruption points):
+    heads.0.head_embed: 0.0000e+00
+    heads.0.feat_proj.0.bias: 0.0000e+00
+    heads.0.attention_conv.9.bias: 3.2522e-07
+    heads.0.norm_input.weight: 3.1665e-03
+    heads.0.norm_input.bias: 5.4949e-02
+
+  Head 0 - Largest gradients:
+    heads.0.attention_conv.3.weight: 4.1562e+00
+    heads.0.feat_proj.0.weight: 5.2429e+00
+    heads.0.attention_conv.6.weight: 7.6118e+00
+    heads.0.pos_embed: 7.8217e+00
+    heads.0.attention_conv.0.weight: 2.8464e+01
+
+  [ReLU Dead Zone Check]:
+    Total ReLU layers: 71
+    Note: ReLU with inplace=True can cause gradient issues in checkpoint mode
+
+  [Sigmoid Saturation Check in bbox_head]:
+
+============================================================
+5. Optimizer Configuration & Parameter Update Check
+============================================================
+
+  [Parameter Group Analysis]:
+    Backbone params: 341
+    Other params: 146
+
+  [Classification Layer Parameter Check]:
+    head_fc: 6 params in group 'other (lr*1.0)'
+      head_fc.0.weight: shape=[11, 1026], grad=Yes
+      head_fc.0.bias: shape=[11], grad=Yes
+      head_fc.1.weight: shape=[11, 1026], grad=Yes
+    cls_layer: 6 params in group 'other (lr*1.0)'
+      heads.0.cls_layer.weight: shape=[11, 1026], grad=Yes
+      heads.0.cls_layer.bias: shape=[11], grad=Yes
+      heads.1.cls_layer.weight: shape=[11, 1026], grad=Yes
+    roi_cls_heads: 6 params in group 'other (lr*1.0)'
+      roi_cls_heads.0.weight: shape=[11, 256], grad=Yes
+      roi_cls_heads.0.bias: shape=[11], grad=Yes
+      roi_cls_heads.1.weight: shape=[11, 256], grad=Yes
+
+  [Learning Rate Configuration]:
+    Base LR: 0.0003
+    Backbone LR factor: 0.3
+    Backbone effective LR: 0.000090
+    Head FC effective LR: 0.000300
+
+  [Weight Decay Impact]:
+    Weight decay: 0.0001
+    head_fc.0.weight: param_norm=1.9130e+00, wd_effect=1.9130e-04
+    head_fc.0.bias: param_norm=5.9970e-02, wd_effect=5.9970e-06
+    head_fc.1.weight: param_norm=1.9314e+00, wd_effect=1.9314e-04
+    head_fc.1.bias: param_norm=4.6091e-02, wd_effect=4.6091e-06
+    head_fc.2.weight: param_norm=1.9092e+00, wd_effect=1.9092e-04
+    head_fc.2.bias: param_norm=6.7327e-02, wd_effect=6.7327e-06
+    heads.0.cls_layer.weight: param_norm=4.6866e+00, wd_effect=4.6866e-04
+    heads.0.cls_layer.bias: param_norm=0.0000e+00, wd_effect=0.0000e+00
+
+  [Simulated Parameter Update Test]:
+  Parameter changes after one optimizer step:
+    heads.0.cls_layer.weight: max_change=2.883524e-04 ✅
+    heads.0.cls_layer.bias: max_change=2.984867e-04 ✅
+    heads.1.cls_layer.weight: max_change=2.892930e-04 ✅
+    heads.1.cls_layer.bias: max_change=2.986086e-04 ✅
+    heads.2.cls_layer.weight: max_change=2.879240e-04 ✅
+    heads.2.cls_layer.bias: max_change=2.985987e-04 ✅
+    head_fc.0.weight: max_change=2.995525e-04 ✅
+    head_fc.0.bias: max_change=2.984880e-04 ✅
+    head_fc.1.weight: max_change=2.996689e-04 ✅
+    head_fc.1.bias: max_change=2.986100e-04 ✅
+    head_fc.2.weight: max_change=2.996568e-04 ✅
+    head_fc.2.bias: max_change=2.985997e-04 ✅
+
+============================================================
+Classification Layer Diagnostic Complete!
+Report saved to: D:\HuaweiMoveData\Users\官海峰\Desktop\2026春\人工智能\Project1-街景字符识别\Street_Character_Recognition\cls_gradient_diagnostic_output.txt
+============================================================
+
+============================================================
+ROOT CAUSE SUMMARY
+============================================================
+
+  1. cls_layer无梯度根因:
+     - 在forward()中，heads返回(cls_out, bbox_out, hidden)
+     - 但只取hidden(r[2])送入head_interaction → head_fc
+     - cls_layer的输出cls_out(r[0])被完全丢弃
+     - cls_layer仅通过aux_loss(权重0.1)获得微弱梯度
+     - 而在forward_with_attn()中，head_cls_outs才被用于aux_loss
+
+  2. BN层激活爆炸根因:
+     - _reset_batch_norm_stats()将预训练ResNet101的所有BN running stats重置
+     - 导致初始阶段激活值呈指数级增长(已达10^19量级)
+     - 这使得BN层梯度也异常巨大(最大1063)
+
+  3. 修复方案:
+     - BN: 仅重置FPN新增层的BN stats，保留预训练层的stats
+     - cls_layer: 增大aux_loss权重，或重新设计使cls_layer参与主分类路径
+

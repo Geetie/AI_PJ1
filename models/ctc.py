@@ -14,7 +14,7 @@ class CTCModel(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(512, 256),
             nn.LayerNorm(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Dropout(config.dropout),
             nn.Linear(256, num_classes)
         )

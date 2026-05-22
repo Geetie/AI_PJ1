@@ -15,8 +15,8 @@ class PositionAwareAttentionHead(nn.Module):
         super().__init__()
         self.head_idx = head_idx
         S = config.feat_spatial_size
-        self.pos_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, S, S) * 0.05)
-        self.head_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, 1, 1) * 0.05)
+        self.pos_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, S, S) * 0.1)
+        self.head_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, 1, 1) * 0.1)
         self.num_attn_channels = config.num_attn_channels
         self.attn_temperature = config.soft_attn_temperature
         self.norm_input = nn.BatchNorm2d(in_channels + config.pos_embed_channels * 2)
@@ -24,13 +24,13 @@ class PositionAwareAttentionHead(nn.Module):
             nn.Conv2d(in_channels + config.pos_embed_channels * 2, in_channels + config.pos_embed_channels * 2, 3,
                       padding=1, groups=in_channels + config.pos_embed_channels * 2, bias=False),
             nn.BatchNorm2d(in_channels + config.pos_embed_channels * 2),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Conv2d(in_channels + config.pos_embed_channels * 2, 256, 1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Conv2d(256, 128, 3, padding=1, bias=False),
             nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Conv2d(128, self.num_attn_channels, 1),
         )
         self.attn_pool = nn.AdaptiveAvgPool2d(4)
@@ -38,7 +38,7 @@ class PositionAwareAttentionHead(nn.Module):
         self.feat_proj = nn.Sequential(
             nn.Linear(pool_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Dropout(config.dropout),
         )
         self.cls_layer = nn.Linear(hidden_dim, num_classes)
@@ -46,7 +46,7 @@ class PositionAwareAttentionHead(nn.Module):
         self.bbox_head = nn.Sequential(
             nn.Linear(in_channels * 4 * 4, hidden_dim // 2),
             nn.BatchNorm1d(hidden_dim // 2),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Linear(hidden_dim // 2, 4),
             nn.Sigmoid()
         )
@@ -56,11 +56,11 @@ class PositionAwareAttentionHead(nn.Module):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 if m.groups == m.in_channels and m.groups > 1:
-                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='leaky_relu')
                 elif m.groups > 1:
                     nn.init.normal_(m.weight, mean=0.0, std=0.01)
                 else:
-                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='leaky_relu')
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Linear):
@@ -111,19 +111,19 @@ class CrossHeadCommLayer(nn.Module):
         self.pos_proj = nn.Sequential(
             nn.Conv2d(pos_channels, 32, 1, bias=False),
             nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.comm_conv = nn.Sequential(
             nn.Conv2d(feat_dim + 32 * num_heads, feat_dim, 1, bias=False),
             nn.BatchNorm2d(feat_dim),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self._init_weights()
 
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='leaky_relu')
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.BatchNorm2d):
@@ -212,15 +212,15 @@ class DigitsResnet101(nn.Module):
                 nn.Sequential(
                     nn.Conv2d(config.multiscale_feat_dim, config.roi_feat_dim, 3, padding=1, bias=False),
                     nn.BatchNorm2d(config.roi_feat_dim),
-                    nn.ReLU(inplace=True),
+                    nn.LeakyReLU(0.01, inplace=True),
                     nn.Conv2d(config.roi_feat_dim, config.roi_feat_dim, 3, padding=1, bias=False),
                     nn.BatchNorm2d(config.roi_feat_dim),
-                    nn.ReLU(inplace=True),
+                    nn.LeakyReLU(0.01, inplace=True),
                     nn.AdaptiveAvgPool2d(1),
                     nn.Flatten(),
                     nn.Linear(config.roi_feat_dim, config.roi_feat_dim),
                     nn.BatchNorm1d(config.roi_feat_dim),
-                    nn.ReLU(inplace=True),
+                    nn.LeakyReLU(0.01, inplace=True),
                     nn.Dropout(config.dropout),
                 ) for _ in range(num_heads)
             ])
@@ -241,10 +241,11 @@ class DigitsResnet101(nn.Module):
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
             nn.Linear(config.multiscale_feat_dim, 64),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Dropout(config.dropout),
             nn.Linear(64, num_heads + 1),
         )
+        self._bn_protection = None
 
     def _init_extra_weights(self):
         """额外的权重初始化，确保关键层的梯度流动"""
@@ -269,7 +270,7 @@ class DigitsResnet101(nn.Module):
         for i in range(self.num_heads):
             for m in self.roi_cnn[i].modules():
                 if isinstance(m, nn.Conv2d):
-                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='leaky_relu')
                     if m.bias is not None:
                         nn.init.zeros_(m.bias)
                 elif isinstance(m, nn.Linear):
@@ -328,6 +329,14 @@ class DigitsResnet101(nn.Module):
     def set_roi_gt_prob(self, prob):
         self.roi_gt_prob = prob
 
+    def setup_bn_protection(self, warmup_epochs=10, freeze_epochs=0,
+                            bn_grad_max_norm=1.0, auto_fix=True):
+        from utils.bn_protection import install_bn_protection
+        self._bn_protection = install_bn_protection(
+            self, warmup_epochs=warmup_epochs, freeze_epochs=freeze_epochs,
+            bn_grad_max_norm=bn_grad_max_norm, auto_fix=auto_fix)
+        return self._bn_protection
+
     def forward(self, img, gt_bboxes=None):
         feat = self.backbone(img)
         length_logits = self.length_head(feat)
@@ -344,10 +353,12 @@ class DigitsResnet101(nn.Module):
         else:
             for head in self.heads:
                 results.append(head(feat))
+        head_cls_outs = tuple(r[0] for r in results)
         bbox_outs = tuple(r[1] for r in results)
         head_feats = [r[2] for r in results]
         interacted = self.head_interaction(head_feats)
-        cls_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        fc_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        cls_outs = tuple(fc_outs[h] + head_cls_outs[h] for h in range(self.num_heads))
         cls_outs = self._apply_roi_refine(feat, cls_outs, bbox_outs, gt_bboxes)
         return cls_outs, bbox_outs, length_logits
 
@@ -365,7 +376,8 @@ class DigitsResnet101(nn.Module):
             attn_maps.append(attn)
         bbox_tuple = tuple(bbox_outs)
         interacted = self.head_interaction(head_feats)
-        cls_list = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        fc_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        cls_list = tuple(fc_outs[h] + head_cls_outs[h] for h in range(self.num_heads))
         cls_list = self._apply_roi_refine(feat, cls_list, bbox_tuple, gt_bboxes)
         return cls_list, bbox_tuple, attn_maps, tuple(head_cls_outs), length_logits
 
@@ -374,15 +386,17 @@ class DigitsResnet101(nn.Module):
         length_logits = self.length_head(feat)
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         results = [head(feat) for head in self.heads]
+        head_cls_outs = tuple(r[0] for r in results)
         bbox_outs = tuple(r[1] for r in results)
         head_feats = [r[2] for r in results]
         interacted = self.head_interaction(head_feats)
-        cls_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        fc_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
+        cls_outs = tuple(fc_outs[h] + head_cls_outs[h] for h in range(self.num_heads))
         cls_outs = self._apply_roi_refine(feat, cls_outs, bbox_outs)
-        probs = tuple(F.softmax(c.float(), dim=1).to(c.dtype) for c in cls_outs)
+        probs = [F.softmax(c.float(), dim=1).to(c.dtype) for c in cls_outs]
         pred_length = length_logits.argmax(dim=1)
         for h in range(self.num_heads):
             mask = (pred_length <= h).unsqueeze(1).expand_as(probs[h])
             probs[h] = probs[h].masked_fill(mask, 0.0)
             probs[h][:, 10] = probs[h][:, 10].masked_fill(mask[:, 10], 1.0)
-        return probs
+        return tuple(probs)

@@ -25,7 +25,7 @@ class SEBlock(nn.Module):
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Sequential(
             nn.Linear(channels, mid, bias=False),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
             nn.Linear(mid, channels, bias=False),
             nn.Sigmoid()
         )
@@ -65,50 +65,50 @@ class FPNBackbone(nn.Module):
         self.l1_reduce = nn.Sequential(
             nn.Conv2d(256, p1_ch, 1, bias=False),
             nn.BatchNorm2d(p1_ch),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.l2_reduce = nn.Sequential(
             nn.Conv2d(512, 256, 1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.l2_to_p1 = nn.Sequential(
             nn.Conv2d(256, p1_ch, 1, bias=False),
             nn.BatchNorm2d(p1_ch),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.l3_reduce = nn.Sequential(
             nn.Conv2d(1024, 256, 1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.l4_reduce = nn.Sequential(
             nn.Conv2d(2048, 256, 1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         
         self.smooth_p3 = nn.Sequential(
             nn.Conv2d(256, 256, 3, padding=1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.smooth_p2 = nn.Sequential(
             nn.Conv2d(256, 256, 3, padding=1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.smooth_p1 = nn.Sequential(
             nn.Conv2d(p1_ch, p1_ch, 3, padding=1, bias=False),
             nn.BatchNorm2d(p1_ch),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         
         fuse_in = p1_ch + 256 + 256 + 256
         self.fuse = nn.Sequential(
             nn.Conv2d(fuse_in, config.multiscale_feat_dim, 3, padding=1, bias=False),
             nn.BatchNorm2d(config.multiscale_feat_dim),
-            nn.ReLU(inplace=True),
+            nn.LeakyReLU(0.01, inplace=True),
         )
         self.se = SEBlock(config.multiscale_feat_dim)
         self.use_checkpoint = True
@@ -116,22 +116,23 @@ class FPNBackbone(nn.Module):
         self._reset_batch_norm_stats()
 
     def _reset_batch_norm_stats(self):
-        """重置所有BatchNorm层的运行统计量
-        
-        预训练模型的BatchNorm统计量与当前任务数据分布不匹配，
-        重置后让模型在新任务上重新学习合适的统计量，避免激活值爆炸。
-        """
-        for m in self.modules():
+        fpn_prefixes = (
+            'l1_reduce', 'l2_reduce', 'l2_to_p1', 'l3_reduce', 'l4_reduce',
+            'smooth_p3', 'smooth_p2', 'smooth_p1', 'fuse',
+        )
+        for name, m in self.named_modules():
             if isinstance(m, nn.BatchNorm2d):
-                m.running_mean.fill_(0)
-                m.running_var.fill_(1)
-                m.num_batches_tracked.zero_()
+                is_fpn = any(name.startswith(prefix) for prefix in fpn_prefixes)
+                if is_fpn:
+                    m.running_mean.fill_(0)
+                    m.running_var.fill_(1)
+                    m.num_batches_tracked.zero_()
 
     def _init_weights(self):
         """初始化FPN相关层的权重"""
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='leaky_relu')
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.BatchNorm2d):

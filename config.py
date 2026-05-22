@@ -166,6 +166,18 @@ class Config:
     roi_gt_prob = 0.8
     num_attn_channels = 8
     soft_attn_temperature = 0.5
+
+    # 梯度平衡配置（补偿不同损失函数的固有梯度幅度差异）
+    # 根据诊断结果：Classification梯度是BBox的242倍，是Length的1854倍
+    # 使用保守补偿因子避免梯度爆炸
+    gradient_balance = {
+        'enabled': True,
+        'cls_norm_factor': 1.0,
+        'bbox_norm_factor': 50.0,
+        'length_norm_factor': 200.0,
+    }
+    # ROI Teacher Forcing衰减配置
+    roi_gt_decay_end_ratio = 0.5
     
     # Transformer特有参数
     transformer_heads = 4
