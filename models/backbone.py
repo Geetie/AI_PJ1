@@ -2,7 +2,6 @@
 import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
-from contextlib import nullcontext
 from torchvision.models.resnet import resnet101, ResNet101_Weights
 
 _config = None
@@ -14,14 +13,6 @@ def _get_config():
         from config import config as cfg
         _config = cfg
     return _config
-
-
-def _amp_checkpoint_context():
-    if t.is_autocast_enabled():
-        dtype = t.bfloat16 if _get_config().use_bf16 else t.float16
-        ctx = t.amp.autocast('cuda', enabled=True, dtype=dtype)
-        return ctx, ctx
-    return nullcontext(), nullcontext()
 
 
 class SEBlock(nn.Module):
@@ -114,7 +105,7 @@ class FPNBackbone(nn.Module):
             nn.LeakyReLU(0.01, inplace=True),
         )
         self.se = SEBlock(config.multiscale_feat_dim)
-        self.use_checkpoint = True
+        self.use_checkpoint = config.use_gradient_checkpoint
         self._init_weights()
         self._reset_batch_norm_stats()
 
@@ -156,21 +147,11 @@ class FPNBackbone(nn.Module):
         return c1, c2, c3
 
     def forward(self, x):
-        config = _get_config()
-        use_ckpt = self.training and self.use_checkpoint
-        use_ckpt = use_ckpt and not config.use_torch_compile
-        if use_ckpt and config.use_bf16 and not config.gradient_checkpoint_with_bf16:
-            use_ckpt = False
-
         x = self.stem(x)
         c1 = self.layer1(x)
         c2 = self.layer2(c1)
-        if use_ckpt:
-            c3 = t.utils.checkpoint.checkpoint(
-                self.layer3, c2,
-                use_reentrant=False,
-                context_fn=_amp_checkpoint_context,
-            )
+        if self.training and self.use_checkpoint:
+            c3 = t.utils.checkpoint.checkpoint(self.layer3, c2, use_reentrant=True)
         else:
             c3 = self.layer3(c2)
         c4 = self.layer4(c3)

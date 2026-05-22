@@ -301,7 +301,7 @@ class DigitsResnet101(nn.Module):
             self.has_roi = False
             return t.zeros(B, config.class_num, device=feat.device)
         if self.training and config.use_gradient_checkpoint and not config.use_torch_compile:
-            roi_processed = t.utils.checkpoint.checkpoint(self.roi_cnn[head_idx], roi_feat, use_reentrant=False)
+            roi_processed = t.utils.checkpoint.checkpoint(self.roi_cnn[head_idx], roi_feat, use_reentrant=True)
         else:
             roi_processed = self.roi_cnn[head_idx](roi_feat)
         return self.roi_cls_heads[head_idx](roi_processed)
@@ -349,7 +349,7 @@ class DigitsResnet101(nn.Module):
             for head in self.heads:
                 def forward_fn(x, return_attn=False):
                     return head(x, return_attn=return_attn)
-                results.append(t.utils.checkpoint.checkpoint(forward_fn, feat, False, use_reentrant=False))
+                results.append(t.utils.checkpoint.checkpoint(forward_fn, feat, False, use_reentrant=True))
         else:
             for head in self.heads:
                 results.append(head(feat))

@@ -68,12 +68,13 @@ COMPILE_AVAILABLE = COMPILE_AVAILABLE
 class Config:
     """所有超参数配置"""
     # =========================================================
-    # GPU 利用率优化：A10 22.2GB，batch_size=36 + grad_accum_steps=7 → effective batch=252
+    # A10 22.2GB，batch_size=32 + grad_accum_steps=8 → effective batch=256
+    # 禁用gradient checkpoint，显存余量~4-6GB（含CUDA context+碎片）
     # =========================================================
-    batch_size = 36
-    eval_batch_size = 36
+    batch_size = 32
+    eval_batch_size = 32
     lr = 3e-4
-    backbone_lr_factor = 0.3  # 提高以加快预训练层的微调速度
+    backbone_lr_factor = 0.3
     momentum = 0.9
     weights_decay = 1e-4
     class_num = 11
@@ -81,8 +82,8 @@ class Config:
     optimizer_type = 'adamw'
     scheduler_type = 'cosine'
     
-    grad_accum_steps = 7
-    grad_clip_max_norm = 2.0  # 保守值，平衡梯度裁剪和有效梯度保留
+    grad_accum_steps = 8
+    grad_clip_max_norm = 2.0
     
     cls_loss_weight = 1.0
     aux_loss_weight = 0.1
@@ -144,7 +145,7 @@ class Config:
     fc_hidden = 1026  # ⚠️ 修改为能被 NUM_HEADS(3) 整除的值 (1024 % 3 = 1 ❌, 1026 % 3 = 0 ✅)
     ema_decay = 0.998
     use_torch_compile = False
-    use_gradient_checkpoint = True
+    use_gradient_checkpoint = False  # batch_size=36时不需要checkpoint，避免CheckpointError
     gradient_checkpoint_with_bf16 = False  # BF16模式下禁用梯度检查点以避免数值不稳定
     
     # Torch Compile配置
