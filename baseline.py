@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch as t
 import torch.nn as nn
+from contextlib import nullcontext
 from tqdm.auto import tqdm
 from torchvision import transforms
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
@@ -194,6 +195,14 @@ class SEBlock(nn.Module):
         return x * w.view(B, C, 1, 1)
 
 
+def _amp_checkpoint_context():
+    if t.is_autocast_enabled():
+        dtype = t.bfloat16 if config.use_bf16 else t.float16
+        ctx = t.amp.autocast('cuda', enabled=True, dtype=dtype)
+        return ctx, ctx
+    return nullcontext(), nullcontext()
+
+
 class FPNBackbone(nn.Module):
     def __init__(self):
         super().__init__()
@@ -288,7 +297,11 @@ class FPNBackbone(nn.Module):
         c1 = self.layer1(x)
         c2 = self.layer2(c1)
         if self.training and self.use_checkpoint:
-            c3 = t.utils.checkpoint.checkpoint(self.layer3, c2, use_reentrant=True)
+            c3 = t.utils.checkpoint.checkpoint(
+                self.layer3, c2,
+                use_reentrant=False,
+                context_fn=_amp_checkpoint_context,
+            )
         else:
             c3 = self.layer3(c2)
         c4 = self.layer4(c3)
@@ -1977,7 +1990,11 @@ class CTCModel(nn.Module):
         c1 = self.layer1(x)
         c2 = self.layer2(c1)
         if self.training and self.use_checkpoint:
-            c3 = t.utils.checkpoint.checkpoint(self.layer3, c2, use_reentrant=True)
+            c3 = t.utils.checkpoint.checkpoint(
+                self.layer3, c2,
+                use_reentrant=False,
+                context_fn=_amp_checkpoint_context,
+            )
         else:
             c3 = self.layer3(c2)
         c4 = self.layer4(c3)

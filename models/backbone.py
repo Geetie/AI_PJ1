@@ -2,6 +2,7 @@
 import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
+from contextlib import nullcontext
 from torchvision.models.resnet import resnet101, ResNet101_Weights
 
 _config = None
@@ -13,6 +14,14 @@ def _get_config():
         from config import config as cfg
         _config = cfg
     return _config
+
+
+def _amp_checkpoint_context():
+    if t.is_autocast_enabled():
+        dtype = t.bfloat16 if _get_config().use_bf16 else t.float16
+        ctx = t.amp.autocast('cuda', enabled=True, dtype=dtype)
+        return ctx, ctx
+    return nullcontext(), nullcontext()
 
 
 class SEBlock(nn.Module):
@@ -157,7 +166,11 @@ class FPNBackbone(nn.Module):
         c1 = self.layer1(x)
         c2 = self.layer2(c1)
         if use_ckpt:
-            c3 = t.utils.checkpoint.checkpoint(self.layer3, c2, use_reentrant=True)
+            c3 = t.utils.checkpoint.checkpoint(
+                self.layer3, c2,
+                use_reentrant=False,
+                context_fn=_amp_checkpoint_context,
+            )
         else:
             c3 = self.layer3(c2)
         c4 = self.layer4(c3)

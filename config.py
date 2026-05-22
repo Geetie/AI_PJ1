@@ -68,11 +68,10 @@ COMPILE_AVAILABLE = COMPILE_AVAILABLE
 class Config:
     """所有超参数配置"""
     # =========================================================
-    # GPU 利用率优化：A10 22.2GB，batch_size=12 仅用 5.7GB (26%)
-    # batch_size=32 + grad_accum_steps=8 → effective batch=256
+    # GPU 利用率优化：A10 22.2GB，batch_size=36 + grad_accum_steps=7 → effective batch=252
     # =========================================================
-    batch_size = 56
-    eval_batch_size = 56
+    batch_size = 36
+    eval_batch_size = 36
     lr = 3e-4
     backbone_lr_factor = 0.3  # 提高以加快预训练层的微调速度
     momentum = 0.9
@@ -82,7 +81,7 @@ class Config:
     optimizer_type = 'adamw'
     scheduler_type = 'cosine'
     
-    grad_accum_steps = 4
+    grad_accum_steps = 7
     grad_clip_max_norm = 2.0  # 保守值，平衡梯度裁剪和有效梯度保留
     
     cls_loss_weight = 1.0
