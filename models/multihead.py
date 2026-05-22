@@ -15,8 +15,8 @@ class PositionAwareAttentionHead(nn.Module):
         super().__init__()
         self.head_idx = head_idx
         S = config.feat_spatial_size
-        self.pos_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, S, S) * 0.1)
-        self.head_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, 1, 1) * 0.1)
+        self.pos_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, S, S) * 0.02)
+        self.head_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, 1, 1) * 0.02)
         self.num_attn_channels = config.num_attn_channels
         self.attn_temperature = config.soft_attn_temperature
         self.norm_input = nn.BatchNorm2d(in_channels + config.pos_embed_channels * 2)
@@ -81,12 +81,15 @@ class PositionAwareAttentionHead(nn.Module):
         attn_raw = self.attention_conv(x_input)
         
         if self.num_attn_channels == 1:
-            attn_weights = F.softmax(attn_raw.view(B, -1), dim=1).view(B, 1, H, W)
+            attn_raw_clamped = attn_raw.clamp(max=10.0, min=-10.0)
+            attn_weights = F.softmax(attn_raw_clamped.view(B, -1), dim=1).view(B, 1, H, W)
         else:
-            attn_per_ch = F.softmax(attn_raw.view(B, self.num_attn_channels, -1), dim=2)
+            attn_raw_clamped = attn_raw.clamp(max=10.0, min=-10.0)
+            attn_per_ch = F.softmax(attn_raw_clamped.view(B, self.num_attn_channels, -1), dim=2)
             attn_per_ch = attn_per_ch.view(B, self.num_attn_channels, H, W)
             peak_conf = attn_per_ch.amax(dim=(2, 3))
-            soft_weights = F.softmax(peak_conf.float() / self.attn_temperature, dim=1).to(attn_per_ch.dtype)
+            peak_conf_clamped = peak_conf.float().clamp(max=10.0, min=-10.0)
+            soft_weights = F.softmax(peak_conf_clamped / self.attn_temperature, dim=1).to(attn_per_ch.dtype)
             attn_weights = (soft_weights.unsqueeze(-1).unsqueeze(-1) * attn_per_ch).sum(dim=1, keepdim=True)
         
         # 使用除法归一化，attn_weights已经经过softmax，不需要再次softmax
@@ -158,6 +161,7 @@ class HeadInteractionLayer(nn.Module):
         self.norm2 = nn.LayerNorm(feat_dim)
         
         self.ffn = nn.Sequential(
+            nn.LayerNorm(feat_dim),
             nn.Linear(feat_dim, feat_dim * 4),
             nn.GELU(),
             nn.Dropout(dropout),

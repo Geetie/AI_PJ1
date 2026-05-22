@@ -68,12 +68,12 @@ COMPILE_AVAILABLE = COMPILE_AVAILABLE
 class Config:
     """所有超参数配置"""
     # =========================================================
-    # A10 22.2GB，batch_size=32 + grad_accum_steps=8 → effective batch=256
+    # A10 22.2GB，batch_size=24 + grad_accum_steps=11 → effective batch=264
     # 禁用gradient checkpoint，显存余量~4-6GB（含CUDA context+碎片）
     # =========================================================
-    batch_size = 32
+    batch_size = 24
     eval_batch_size = 32
-    lr = 3e-4
+    lr = 1e-4
     backbone_lr_factor = 0.3
     momentum = 0.9
     weights_decay = 1e-4
@@ -82,13 +82,13 @@ class Config:
     optimizer_type = 'adamw'
     scheduler_type = 'cosine'
     
-    grad_accum_steps = 8
-    grad_clip_max_norm = 2.0
+    grad_accum_steps = 11
+    grad_clip_max_norm = 1.0
     
     cls_loss_weight = 1.0
     aux_loss_weight = 0.1
-    bbox_loss_weight = 5.0
-    length_loss_weight = 3.0
+    bbox_loss_weight = 1.0
+    length_loss_weight = 1.0
     attn_diversity_weight = 0.02
     ordering_loss_weight = 0.02
     attn_supervision_weight = 0.05
@@ -104,7 +104,7 @@ class Config:
     pretrained = None
     start_epoch = 0
     epoches = 120
-    warmup_epochs = 10
+    warmup_epochs = 15
     resume_weights_only = False
     
     # 数据加载
@@ -135,7 +135,7 @@ class Config:
     tta_sizes = [288, 320, 352, 384, 416]
     
     # 学习率调度
-    warmup_start_factor = 0.05
+    warmup_start_factor = 0.01
     scheduler_T0 = 5
     scheduler_T_mult = 2
     scheduler_eta_min = 1e-6
@@ -164,16 +164,16 @@ class Config:
     head_interaction_layers = 4
     roi_gt_prob = 0.8
     num_attn_channels = 8
-    soft_attn_temperature = 0.5
+    soft_attn_temperature = 1.0
 
     # 梯度平衡配置（补偿不同损失函数的固有梯度幅度差异）
     # 根据诊断结果：Classification梯度是BBox的242倍，是Length的1854倍
     # 使用保守补偿因子避免梯度爆炸
     gradient_balance = {
-        'enabled': True,
+        'enabled': False,
         'cls_norm_factor': 1.0,
-        'bbox_norm_factor': 50.0,
-        'length_norm_factor': 200.0,
+        'bbox_norm_factor': 1.0,
+        'length_norm_factor': 1.0,
     }
     # ROI Teacher Forcing衰减配置
     roi_gt_decay_end_ratio = 0.5

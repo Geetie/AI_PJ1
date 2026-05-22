@@ -469,7 +469,7 @@ class BaseTrainer:
                 'weight_decay': config.weights_decay, 'betas': (0.9, 0.999)},
                 {'params': other_no_decay, 'lr': config.lr, 
                 'weight_decay': 0.0, 'betas': (0.9, 0.999)},
-            ], eps=1e-8)
+            ], eps=1e-6)
         return SGD([
             {'params': backbone_params, 'lr': config.lr * config.backbone_lr_factor},
             {'params': other_params, 'lr': config.lr},
@@ -503,8 +503,8 @@ class BaseTrainer:
     def _setup_scaler(self, init_scale=None):
         if self.use_bf16:
             return GradScaler(self.device.type, enabled=False)
-        scale = init_scale if init_scale is not None else 2**14
-        scaler = GradScaler(self.device.type, enabled=self.use_amp, init_scale=scale, growth_interval=2000)
+        scale = init_scale if init_scale is not None else 2**9
+        scaler = GradScaler(self.device.type, enabled=self.use_amp, init_scale=scale, growth_interval=1000)
         return scaler
 
     def _pre_epoch_hook(self, epoch):

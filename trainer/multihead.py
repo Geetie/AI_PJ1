@@ -294,39 +294,48 @@ class MultiHeadTrainer(BaseTrainer):
         self._diagnose_dataloader()
 
     def _compute_adaptive_loss_weights(self, epoch):
-        base_epoch = config.warmup_epochs
+        warmup = config.warmup_epochs
 
         if not config.gradient_balance.get('enabled', True):
-            if epoch < base_epoch:
-                return {'cls': 1.0, 'bbox': 0.3, 'div': 0.5, 'ord': 0.3, 'attn': 0.3, 'aux': 0.5, 'length': 0.5}
-            progress = min((epoch - base_epoch) / (config.epoches - base_epoch), 1.0)
-            return {
-                'cls': 1.0,
-                'bbox': 0.3 + 0.7 * progress,
-                'div': 0.5 + 0.5 * progress,
-                'ord': 0.3 + 0.7 * progress,
-                'attn': 0.3 + 0.7 * progress,
-                'aux': 0.5 + 0.5 * progress,
-                'length': 0.5 + 2.5 * progress
-            }
+            if epoch < warmup // 2:
+                return {'cls': 1.0, 'bbox': 0.0, 'div': 0.0,
+                        'ord': 0.0, 'attn': 0.0, 'aux': 0.5, 'length': 0.0}
+            elif epoch < warmup:
+                progress = (epoch - warmup // 2) / (warmup // 2)
+                return {'cls': 1.0, 'bbox': progress, 'div': 0.0,
+                        'ord': 0.0, 'attn': 0.0, 'aux': 0.5, 'length': progress * 0.5}
+            else:
+                progress = min((epoch - warmup) / 30.0, 1.0)
+                return {
+                    'cls': 1.0,
+                    'bbox': 1.0,
+                    'div': 0.5 + 0.5 * progress,
+                    'ord': 0.3 + 0.7 * progress,
+                    'attn': 0.3 + 0.7 * progress,
+                    'aux': 0.5 + 0.5 * progress,
+                    'length': 0.5 + 0.5 * progress,
+                }
 
         bbox_compensation = config.gradient_balance.get('bbox_norm_factor', 50.0)
         length_compensation = config.gradient_balance.get('length_norm_factor', 200.0)
 
-        if epoch < base_epoch:
-            warmup_factor = epoch / max(base_epoch, 1)
+        if epoch < warmup // 2:
+            return {'cls': 1.0, 'bbox': 0.0, 'div': 0.0,
+                    'ord': 0.0, 'attn': 0.0, 'aux': 0.5, 'length': 0.0}
+        elif epoch < warmup:
+            progress = (epoch - warmup // 2) / (warmup // 2)
             return {
-                'cls': 0.5 + 0.5 * warmup_factor,
-                'bbox': bbox_compensation * (0.3 + 0.2 * warmup_factor),
-                'div': 0.5,
-                'ord': bbox_compensation * (0.2 + 0.1 * warmup_factor),
-                'attn': bbox_compensation * (0.2 + 0.1 * warmup_factor),
-                'aux': 0.3 + 0.2 * warmup_factor,
-                'length': length_compensation * (0.2 + 0.1 * warmup_factor),
+                'cls': 1.0,
+                'bbox': bbox_compensation * progress * 0.1,
+                'div': 0.0,
+                'ord': 0.0,
+                'attn': 0.0,
+                'aux': 0.5,
+                'length': length_compensation * progress * 0.05,
             }
 
         transition_epochs = 30
-        progress = min((epoch - base_epoch) / transition_epochs, 1.0)
+        progress = min((epoch - warmup) / transition_epochs, 1.0)
         cos_factor = 0.5 * (1 + t.cos(t.tensor(progress * t.pi)))
 
         return {
@@ -732,8 +741,11 @@ class MultiHeadTrainer(BaseTrainer):
                 dynamic_ordering_weight = config.ordering_loss_weight * min(1.0, epoch_ratio * 2)
                 dynamic_attn_weight = config.attn_supervision_weight * min(1.0, epoch_ratio * 1.5)
                 
-                ord_loss_clamped = ord_loss.clamp(max=10.0) if isinstance(ord_loss, t.Tensor) else ord_loss
-                attn_sup_loss = attn_sup_loss.clamp(max=15.0) if isinstance(attn_sup_loss, t.Tensor) else attn_sup_loss
+                cls_loss = cls_loss.clamp(max=10.0) if isinstance(cls_loss, t.Tensor) else cls_loss
+                bbox_loss = bbox_loss.clamp(max=5.0) if isinstance(bbox_loss, t.Tensor) else bbox_loss
+                div_loss = div_loss.clamp(max=5.0) if isinstance(div_loss, t.Tensor) else div_loss
+                ord_loss_clamped = ord_loss.clamp(max=5.0) if isinstance(ord_loss, t.Tensor) else ord_loss
+                attn_sup_loss = attn_sup_loss.clamp(max=5.0) if isinstance(attn_sup_loss, t.Tensor) else attn_sup_loss
                 
                 loss = (config.cls_loss_weight * cls_loss * loss_weights['cls'] + 
                         config.bbox_loss_weight * bbox_loss * loss_weights['bbox'] +
@@ -751,10 +763,10 @@ class MultiHeadTrainer(BaseTrainer):
                         else:
                             aux_loss_h = self.head_criteria[h](head_cls_outs[h], label[:, h])
                         aux_loss = aux_loss + aux_loss_h.mean()
-                loss = loss + config.aux_loss_weight * aux_loss * loss_weights['aux']
+                loss = loss + config.aux_loss_weight * aux_loss.clamp(max=10.0) * loss_weights['aux']
                 length_target = true_lengths.clamp(max=config.num_heads)
                 length_loss = self.length_criterion(length_logits, length_target)
-                loss = loss + length_loss * loss_weights['length']
+                loss = loss + length_loss.clamp(max=10.0) * loss_weights['length']
                 loss_for_accum = loss
                 loss = loss / config.grad_accum_steps
 
@@ -782,13 +794,26 @@ class MultiHeadTrainer(BaseTrainer):
                 need_grad_diag = (i % config.print_interval == 0) or (i + 1 == len(tbar))
                 if need_grad_diag:
                     grad_total = 0
-                    for p in self.model.parameters():
+                    per_module_norms = {}
+                    for name, p in self.model.named_parameters():
                         if p.grad is not None:
                             grad_total += 1
-                            grad_norm_before_clip += p.grad.norm().item() ** 2
+                            g_norm = p.grad.norm().item() ** 2
+                            grad_norm_before_clip += g_norm
+                            module_key = name.split('.')[0]
+                            if module_key not in per_module_norms:
+                                per_module_norms[module_key] = 0.0
+                            per_module_norms[module_key] += g_norm
                             if t.isnan(p.grad).any() or t.isinf(p.grad).any():
                                 has_nan_grad = True
                     grad_norm_before_clip = grad_norm_before_clip ** 0.5 if grad_total > 0 else 0.0
+                    for k in per_module_norms:
+                        per_module_norms[k] = per_module_norms[k] ** 0.5
+                    if not has_nan_grad:
+                        self.logger.logger.info(
+                            f'[GRAD-DIAG] Epoch {epoch+1} Batch {i+1}: '
+                            f'total_norm={grad_norm_before_clip:.4f}, '
+                            f'per_module={{{", ".join(f"{k}={v:.4f}" for k, v in sorted(per_module_norms.items()))}}}')
                 else:
                     for p in self.model.parameters():
                         if p.grad is not None:
@@ -799,11 +824,18 @@ class MultiHeadTrainer(BaseTrainer):
                 if has_nan_grad:
                     self._nan_skip_count += 1
                     _batch_scaler_skipped = True
-                    # 无论是否使用BF16，都需要调用scaler.update()保持状态同步
                     self.scaler.update()
                     for p in self.model.parameters():
                         if p.grad is not None:
                             p.grad.zero_()
+                    for group in self.optimizer.param_groups:
+                        for p in group['params']:
+                            state = self.optimizer.state.get(p, None)
+                            if state is not None:
+                                if 'exp_avg' in state:
+                                    state['exp_avg'].zero_()
+                                if 'exp_avg_sq' in state:
+                                    state['exp_avg_sq'].fill_(1e-6)
                     self.logger.logger.warning(
                         f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN/Inf gradient detected, skipping optimizer step '
                         f'(consecutive={self._nan_skip_count}, scaler_scale={self.scaler.get_scale():.1f})')
@@ -815,9 +847,21 @@ class MultiHeadTrainer(BaseTrainer):
                                 f'[TRAIN] Epoch {epoch+1}: NaN/Inf gradient for {self._nan_skip_count} consecutive batches, '
                                 f'reducing LR {old_lr:.8f} -> {pg["lr"]:.8f}')
                         self._nan_lr_reduced = True
+                        self._nan_recovery_counter = 0
                         self._nan_skip_count = 0
                 else:
                     self._nan_skip_count = 0
+                    if self._nan_lr_reduced:
+                        self._nan_recovery_counter = getattr(self, '_nan_recovery_counter', 0) + 1
+                        if self._nan_recovery_counter >= 50:
+                            for pg in self.optimizer.param_groups:
+                                pg['lr'] = pg['lr'] * 5.0
+                            self._nan_lr_reduced = False
+                            self._nan_recovery_counter = 0
+                            self.logger.logger.info(
+                                f'[TRAIN] Epoch {epoch+1}: Recovered from NaN, restoring LR')
+                    else:
+                        self._nan_recovery_counter = 0
                     if self._bn_protection is not None:
                         self._bn_protection['grad_cliper'].clip(self.model)
                     t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self._grad_clip_max_norm)
