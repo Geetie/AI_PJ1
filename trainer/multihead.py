@@ -8,7 +8,7 @@ import numpy as np
 import torch as t
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.amp import autocast
+from torch.amp import autocast, GradScaler
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -83,6 +83,29 @@ class MultiHeadTrainer(BaseTrainer):
         self._nan_skip_count = 0
         self._nan_skip_threshold = 3
         self._nan_lr_reduced = False
+        
+        # 损失权重缓存
+        self._loss_weight_history = []
+
+    def _compute_adaptive_loss_weights(self, epoch):
+        """计算自适应损失权重，平衡各损失项的梯度贡献"""
+        base_epoch = config.warmup_epochs
+        if epoch < base_epoch:
+            return {'cls': 1.0, 'bbox': 0.3, 'div': 0.5, 'ord': 0.3, 'attn': 0.3, 'aux': 0.5, 'length': 0.5}
+        
+        progress = min((epoch - base_epoch) / (config.epoches - base_epoch), 1.0)
+        # 使用余弦退火调整损失权重
+        cos_factor = 0.5 * (1 + t.cos(t.tensor(progress * t.pi)))
+        
+        return {
+            'cls': 1.0,
+            'bbox': 0.3 + 0.7 * progress,
+            'div': 0.5 + 0.5 * cos_factor,
+            'ord': 0.3 + 0.7 * progress,
+            'attn': 0.3 + 0.7 * progress,
+            'aux': 0.5 + 0.5 * progress,
+            'length': 0.5 + 2.5 * progress
+        }
 
         if config.pretrained is not None:
             ckpt = t.load(config.pretrained, map_location=self.device, weights_only=False)
@@ -300,7 +323,7 @@ class MultiHeadTrainer(BaseTrainer):
             with self._compile_logger.phase('warmup_inference'):
                 dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
                 self._compile_logger.logger.info(f'[WARMUP] Running inference pass (bs={warmup_bs})...')
-                with t.no_grad(), autocast(self.device.type, enabled=self.use_amp):
+                with t.no_grad(), autocast(self.device.type, enabled=self.use_amp, dtype=t.bfloat16 if self.use_bf16 else t.float16):
                     _ = self.model(dummy)
                 t.cuda.synchronize()
                 del dummy
@@ -377,7 +400,7 @@ class MultiHeadTrainer(BaseTrainer):
         for h, w in tta_shapes:
             try:
                 dummy = t.randn(eval_bs, 3, h, w, device=self.device)
-                with t.no_grad(), autocast(self.device.type, enabled=self.use_amp):
+                with t.no_grad(), autocast(self.device.type, enabled=self.use_amp, dtype=t.bfloat16 if self.use_bf16 else t.float16):
                     _ = self.model(dummy)
                 t.cuda.synchronize()
                 del dummy
@@ -531,9 +554,15 @@ class MultiHeadTrainer(BaseTrainer):
         self._grad_clip_max_norm = max_grad_norm
 
     def _do_grad_clip(self):
-        """统一的梯度裁剪方法，在optimizer.step()前调用"""
-        if hasattr(self, '_grad_clip_max_norm'):
-            t.nn.utils.clip_grad_norm_(self.model.parameters(), self._grad_clip_max_norm)
+        """自适应梯度裁剪方法，在optimizer.step()前调用"""
+        if not hasattr(self, '_grad_clip_max_norm'):
+            return
+        grads = [p.grad for p in self.model.parameters() if p.grad is not None]
+        if not grads:
+            return
+        grad_norm = t.norm(t.stack([g.norm() for g in grads]), 2)
+        if grad_norm > self._grad_clip_max_norm:
+            t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self._grad_clip_max_norm)
 
     def _train_epoch(self, epoch):
         if not hasattr(self, '_grad_clip_max_norm'):
@@ -590,7 +619,7 @@ class MultiHeadTrainer(BaseTrainer):
             if i % config.grad_accum_steps == 0:
                 self.optimizer.zero_grad()
 
-            with autocast(self.device.type, enabled=self.use_amp):
+            with autocast(self.device.type, enabled=self.use_amp, dtype=t.bfloat16 if self.use_bf16 else t.float16):
                 pred, pred_bboxes, attn_maps, head_cls_outs, length_logits = self.model.forward_with_attn(img, gt_bboxes=bbox_target)
                 if first_batch:
                     t.cuda.synchronize()
@@ -598,7 +627,7 @@ class MultiHeadTrainer(BaseTrainer):
 
                 true_lengths = bbox_mask.sum(dim=1).long()
 
-                cls_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                cls_loss = t.tensor(0.0, device=self.device)
                 for h in range(config.num_heads):
                     if use_cutmix:
                         head_loss_a = self.head_criteria[h](pred[h], label_a[:, h])
@@ -612,7 +641,7 @@ class MultiHeadTrainer(BaseTrainer):
                     div_loss = attention_diversity_loss(attn_maps)
                     attn_sup_loss = self.attn_supervision(attn_maps, bbox_a, mask_a)
                     ord_loss = spatial_ordering_loss(attn_maps, bbox_preds=pred_bboxes, bbox_mask=mask_a)
-                    bbox_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    bbox_loss = t.tensor(0.0, device=self.device)
                     if lam > 0:
                         mixed_bbox_target = lam * bbox_a + (1 - lam) * bbox_b
                     else:
@@ -627,7 +656,7 @@ class MultiHeadTrainer(BaseTrainer):
                     div_loss = attention_diversity_loss(attn_maps)
                     attn_sup_loss = self.attn_supervision(attn_maps, bbox_target, bbox_mask)
                     ord_loss = spatial_ordering_loss(attn_maps, bbox_preds=pred_bboxes, bbox_mask=bbox_mask)
-                    bbox_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    bbox_loss = t.tensor(0.0, device=self.device)
                     valid_bbox_sum = (bbox_target * bbox_mask.unsqueeze(-1)).sum(dim=1)
                     valid_bbox_count = bbox_mask.sum(dim=1, keepdim=True).clamp(min=1)
                     mean_bbox = valid_bbox_sum / valid_bbox_count
@@ -642,19 +671,23 @@ class MultiHeadTrainer(BaseTrainer):
                             if empty_mask_h.sum() > 0:
                                 bbox_loss = bbox_loss + F.smooth_l1_loss(
                                     pred_bboxes[h][empty_mask_h], mean_bbox[empty_mask_h].detach()) * 0.3
+                # 使用自适应损失权重，平衡各损失项的梯度贡献
+                loss_weights = self._compute_adaptive_loss_weights(epoch)
+                
                 epoch_ratio = (epoch + 1) / config.epoches
                 dynamic_ordering_weight = config.ordering_loss_weight * min(1.0, epoch_ratio * 2)
                 dynamic_attn_weight = config.attn_supervision_weight * min(1.0, epoch_ratio * 1.5)
                 
-                ord_loss_clamped = ord_loss.clamp(max=5.0) if isinstance(ord_loss, t.Tensor) else ord_loss
-                attn_sup_loss = attn_sup_loss.clamp(max=8.0) if isinstance(attn_sup_loss, t.Tensor) else attn_sup_loss
+                ord_loss_clamped = ord_loss.clamp(max=10.0) if isinstance(ord_loss, t.Tensor) else ord_loss
+                attn_sup_loss = attn_sup_loss.clamp(max=15.0) if isinstance(attn_sup_loss, t.Tensor) else attn_sup_loss
                 
-                loss = (config.cls_loss_weight * cls_loss + config.bbox_loss_weight * bbox_loss
-                        + config.attn_diversity_weight * div_loss
-                        + dynamic_ordering_weight * ord_loss_clamped
-                        + dynamic_attn_weight * attn_sup_loss)
+                loss = (config.cls_loss_weight * cls_loss * loss_weights['cls'] + 
+                        config.bbox_loss_weight * bbox_loss * loss_weights['bbox'] +
+                        config.attn_diversity_weight * div_loss * loss_weights['div'] +
+                        dynamic_ordering_weight * ord_loss_clamped * loss_weights['ord'] +
+                        dynamic_attn_weight * attn_sup_loss * loss_weights['attn'])
 
-                aux_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                aux_loss = t.tensor(0.0, device=self.device)
                 if len(head_cls_outs) > 0:
                     for h in range(config.num_heads):
                         if use_cutmix:
@@ -664,28 +697,32 @@ class MultiHeadTrainer(BaseTrainer):
                         else:
                             aux_loss_h = self.head_criteria[h](head_cls_outs[h], label[:, h])
                         aux_loss = aux_loss + aux_loss_h.mean()
-                loss = loss + config.aux_loss_weight * aux_loss
+                loss = loss + config.aux_loss_weight * aux_loss * loss_weights['aux']
                 length_target = true_lengths.clamp(max=config.num_heads)
                 length_loss = self.length_criterion(length_logits, length_target)
-                length_loss_weight = min(3.0, (epoch + 1) / max(config.warmup_epochs, 1))
-                loss = loss + length_loss_weight * length_loss
+                loss = loss + length_loss * loss_weights['length']
+                loss_for_accum = loss
                 loss = loss / config.grad_accum_steps
 
                 loss_value = loss.detach()
                 if t.isnan(loss_value).any():
-                    if (i + 1) % config.print_interval == 0 or first_batch:
-                        self.logger.logger.warning(
-                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN loss detected (loss={loss_value.item():.4f}), using zero loss')
-                    loss = loss * 0.0
+                    self.logger.logger.warning(
+                        f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN loss detected (loss={loss_value.item():.4f}), replacing with zero')
+                    loss = loss.nan_to_num(0.0)
                 elif t.isinf(loss_value).any():
-                    if (i + 1) % config.print_interval == 0 or first_batch:
-                        self.logger.logger.warning(
-                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: Inf loss detected (loss={loss_value.item():.4f}), clamping')
+                    self.logger.logger.warning(
+                        f'[TRAIN] Epoch {epoch+1} Batch {i+1}: Inf loss detected (loss={loss_value.item():.4f}), clamping')
                     loss = loss.clamp(max=10.0, min=-10.0)
 
-            self.scaler.scale(loss).backward()
+            if self.use_bf16:
+                loss.backward()
+            else:
+                self.scaler.scale(loss).backward()
 
             if (i + 1) % config.grad_accum_steps == 0 or (i + 1) == len(tbar):
+                if self.use_amp and not self.use_bf16:
+                    self.scaler.unscale_(self.optimizer)
+                
                 grad_norm_before_clip = 0.0
                 has_nan_grad = False
                 grad_total = 0
@@ -700,12 +737,14 @@ class MultiHeadTrainer(BaseTrainer):
                 if has_nan_grad:
                     self._nan_skip_count += 1
                     _batch_scaler_skipped = True
-                    self.scaler.unscale_(self.optimizer)
-                    self.scaler.step(self.optimizer)
+                    # 无论是否使用BF16，都需要调用scaler.update()保持状态同步
                     self.scaler.update()
                     for p in self.model.parameters():
                         if p.grad is not None:
                             p.grad.zero_()
+                    self.logger.logger.warning(
+                        f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN/Inf gradient detected, skipping optimizer step '
+                        f'(consecutive={self._nan_skip_count}, scaler_scale={self.scaler.get_scale():.1f})')
                     if self._nan_skip_count >= self._nan_skip_threshold and not self._nan_lr_reduced:
                         for pg in self.optimizer.param_groups:
                             old_lr = pg['lr']
@@ -715,34 +754,35 @@ class MultiHeadTrainer(BaseTrainer):
                                 f'reducing LR {old_lr:.8f} -> {pg["lr"]:.8f}')
                         self._nan_lr_reduced = True
                         self._nan_skip_count = 0
-                        self.logger.logger.warning(f'[TRAIN] Epoch {epoch+1}: Persistent NaN/Inf gradients, scaler.update() will auto-reduce scale')
-                    elif (i + 1) % config.print_interval == 0 or first_batch:
-                        self.logger.logger.warning(
-                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: NaN/Inf gradient detected, skipping optimizer step')
                 else:
                     self._nan_skip_count = 0
-                    self.scaler.unscale_(self.optimizer)
                     t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self._grad_clip_max_norm)
                     
-                    try:
-                        step_result = self.scaler.step(self.optimizer)
-                        if step_result is None:
-                            _batch_scaler_skipped = True
-                            if (i + 1) % config.print_interval == 0 or first_batch:
-                                self.logger.logger.warning(
-                                    f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() overflow, scaler.update() will auto-reduce scale')
-                        else:
-                            _batch_scaler_skipped = False
-                    except Exception as e:
-                        _batch_scaler_skipped = True
-                        self.logger.logger.warning(
-                            f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() failed with error: {e}')
-                        try:
-                            self.scaler.update()
-                        except Exception:
-                            pass
-                    else:
+                    if not self.use_amp or self.use_bf16:
+                        self.optimizer.step()
+                        _batch_scaler_skipped = False
                         self.scaler.update()
+                    else:
+                        try:
+                            step_result = self.scaler.step(self.optimizer)
+                            if step_result is None:
+                                _batch_scaler_skipped = True
+                                self.logger.logger.warning(
+                                    f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() overflow, '
+                                    f'scaler_scale={self.scaler.get_scale():.1f} will auto-reduce')
+                            else:
+                                _batch_scaler_skipped = False
+                        except Exception as e:
+                            _batch_scaler_skipped = True
+                            self.logger.logger.warning(
+                                f'[TRAIN] Epoch {epoch+1} Batch {i+1}: scaler.step() failed with error: {e}')
+                            try:
+                                self.scaler.update()
+                            except Exception:
+                                pass
+                        else:
+                            self.scaler.update()
+                    
                     if not _batch_scaler_skipped:
                         self.ema.update(self.model)
                     else:

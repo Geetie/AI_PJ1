@@ -72,28 +72,30 @@ class Config:
     # GPU 利用率优化：A10 22.2GB，batch_size=12 仅用 5.7GB (26%)
     # batch_size=32 + grad_accum_steps=8 → effective batch=256
     # =========================================================
-    batch_size = 48
-    eval_batch_size = 48
-    lr = 5e-5  # 降低学习率以解决梯度溢出问题
-    backbone_lr_factor = 0.05
+    batch_size = 56
+    eval_batch_size = 56
+    lr = 3e-4
+    backbone_lr_factor = 0.3  # 提高以加快预训练层的微调速度
     momentum = 0.9
-    weights_decay = 5e-4  # 增强正则化以减少过拟合
+    weights_decay = 1e-4
     class_num = 11
     
     optimizer_type = 'adamw'
     scheduler_type = 'cosine'
     
-    grad_accum_steps = 6
-    grad_clip_max_norm = 5.0  # 放宽梯度裁剪，允许更自然的梯度
+    grad_accum_steps = 4
+    grad_clip_max_norm = 2.0  # 保守值，平衡梯度裁剪和有效梯度保留
     
     cls_loss_weight = 1.0
-    aux_loss_weight = 0.05
-    bbox_loss_weight = 0.5
+    aux_loss_weight = 0.1
+    bbox_loss_weight = 5.0
+    length_loss_weight = 3.0
     attn_diversity_weight = 0.02
-    ordering_loss_weight = 0.01
-    attn_supervision_weight = 0.0  # 禁用强制拟合高斯分布的注意力监督
+    ordering_loss_weight = 0.02
+    attn_supervision_weight = 0.05
     
     use_amp = True
+    use_bf16 = False  # 默认禁用BF16，改用FP16以避免梯度下溢
     
     # 训练流程控制
     eval_interval = 1
@@ -103,13 +105,13 @@ class Config:
     pretrained = None
     start_epoch = 0
     epoches = 120
-    warmup_epochs = 5
+    warmup_epochs = 10
     resume_weights_only = False
     
     # 数据加载
     num_workers = NUM_WORKERS
     pin_memory = True
-    persistent_workers = False
+    persistent_workers = True
     prefetch_factor = 2 if NUM_WORKERS > 0 else None
     multiprocessing_context = 'fork' if os.name != 'nt' and NUM_WORKERS > 0 else None
     
@@ -134,7 +136,7 @@ class Config:
     tta_sizes = [288, 320, 352, 384, 416]
     
     # 学习率调度
-    warmup_start_factor = 0.1
+    warmup_start_factor = 0.05
     scheduler_T0 = 5
     scheduler_T_mult = 2
     scheduler_eta_min = 1e-6
@@ -142,9 +144,10 @@ class Config:
     # 模型架构
     dropout = 0.4  # 增强dropout以减少190M参数模型的过拟合
     fc_hidden = 1026  # ⚠️ 修改为能被 NUM_HEADS(3) 整除的值 (1024 % 3 = 1 ❌, 1026 % 3 = 0 ✅)
-    ema_decay = 0.999
+    ema_decay = 0.998
     use_torch_compile = False
     use_gradient_checkpoint = True
+    gradient_checkpoint_with_bf16 = False  # BF16模式下禁用梯度检查点以避免数值不稳定
     
     # Torch Compile配置
     compile_mode = 'default'
@@ -162,7 +165,7 @@ class Config:
     head_interaction_layers = 4
     roi_gt_prob = 0.8
     num_attn_channels = 8
-    soft_attn_temperature = 0.1
+    soft_attn_temperature = 0.5
     
     # Transformer特有参数
     transformer_heads = 4

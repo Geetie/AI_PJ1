@@ -29,6 +29,14 @@ class SEBlock(nn.Module):
             nn.Linear(mid, channels, bias=False),
             nn.Sigmoid()
         )
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
     def forward(self, x):
         B, C, _, _ = x.shape
@@ -104,6 +112,31 @@ class FPNBackbone(nn.Module):
         )
         self.se = SEBlock(config.multiscale_feat_dim)
         self.use_checkpoint = True
+        self._init_weights()
+        self._reset_batch_norm_stats()
+
+    def _reset_batch_norm_stats(self):
+        """重置所有BatchNorm层的运行统计量
+        
+        预训练模型的BatchNorm统计量与当前任务数据分布不匹配，
+        重置后让模型在新任务上重新学习合适的统计量，避免激活值爆炸。
+        """
+        for m in self.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.running_mean.fill_(0)
+                m.running_var.fill_(1)
+                m.num_batches_tracked.zero_()
+
+    def _init_weights(self):
+        """初始化FPN相关层的权重"""
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
 
     def _forward_early(self, x):
         """
@@ -116,13 +149,18 @@ class FPNBackbone(nn.Module):
         return c1, c2, c3
 
     def forward(self, x):
-        if self.training and self.use_checkpoint:
+        config = _get_config()
+        use_ckpt = self.training and self.use_checkpoint
+        use_ckpt = use_ckpt and not config.use_torch_compile
+        if use_ckpt and config.use_bf16 and not config.gradient_checkpoint_with_bf16:
+            use_ckpt = False
+        
+        if use_ckpt:
             c1, c2, c3 = t.utils.checkpoint.checkpoint(self._forward_early, x, use_reentrant=False)
         else:
             c1, c2, c3 = self._forward_early(x)
         c4 = self.layer4(c3)
         
-        # Top-down pathway with bilinear interpolation (smoother than nearest)
         p4 = self.l4_reduce(c4)
         p3 = self.l3_reduce(c3) + F.interpolate(p4, size=c3.shape[2:], mode='bilinear', align_corners=False)
         p3 = self.smooth_p3(p3)
@@ -131,10 +169,10 @@ class FPNBackbone(nn.Module):
         p1 = self.l1_reduce(c1) + self.l2_to_p1(F.interpolate(p2, size=c1.shape[2:], mode='bilinear', align_corners=False))
         p1 = self.smooth_p1(p1)
         
-        # 上采样所有特征到P1的分辨率进行融合
         p2_up = F.interpolate(p2, size=p1.shape[2:], mode='bilinear', align_corners=False)
         p3_up = F.interpolate(p3, size=p1.shape[2:], mode='bilinear', align_corners=False)
         p4_up = F.interpolate(p4, size=p1.shape[2:], mode='bilinear', align_corners=False)
         
-        # 融合四个尺度的特征
-        return self.se(self.fuse(t.cat([p1, p2_up, p3_up, p4_up], dim=1)))
+        fused = t.cat([p1, p2_up, p3_up, p4_up], dim=1)
+        fused = self.fuse(fused)
+        return self.se(fused)

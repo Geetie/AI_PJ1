@@ -15,10 +15,11 @@ class PositionAwareAttentionHead(nn.Module):
         super().__init__()
         self.head_idx = head_idx
         S = config.feat_spatial_size
-        self.pos_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, S, S) * 0.02)
-        self.head_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, 1, 1) * 0.02)
+        self.pos_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, S, S) * 0.05)
+        self.head_embed = nn.Parameter(t.randn(1, config.pos_embed_channels, 1, 1) * 0.05)
         self.num_attn_channels = config.num_attn_channels
         self.attn_temperature = config.soft_attn_temperature
+        self.norm_input = nn.BatchNorm2d(in_channels + config.pos_embed_channels * 2)
         self.attention_conv = nn.Sequential(
             nn.Conv2d(in_channels + config.pos_embed_channels * 2, in_channels + config.pos_embed_channels * 2, 3,
                       padding=1, groups=in_channels + config.pos_embed_channels * 2, bias=False),
@@ -49,6 +50,26 @@ class PositionAwareAttentionHead(nn.Module):
             nn.Linear(hidden_dim // 2, 4),
             nn.Sigmoid()
         )
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                if m.groups == m.in_channels and m.groups > 1:
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                elif m.groups > 1:
+                    nn.init.normal_(m.weight, mean=0.0, std=0.01)
+                else:
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
 
     def forward(self, x, return_attn=False):
         B, C, H, W = x.shape
@@ -56,23 +77,30 @@ class PositionAwareAttentionHead(nn.Module):
         pos = pos.expand(B, -1, -1, -1)
         head = self.head_embed.expand(B, -1, H, W)
         x_input = t.cat([x, pos, head], dim=1)
+        x_input = self.norm_input(x_input)
         attn_raw = self.attention_conv(x_input)
+        
         if self.num_attn_channels == 1:
             attn_weights = F.softmax(attn_raw.view(B, -1), dim=1).view(B, 1, H, W)
         else:
             attn_per_ch = F.softmax(attn_raw.view(B, self.num_attn_channels, -1), dim=2)
             attn_per_ch = attn_per_ch.view(B, self.num_attn_channels, H, W)
             peak_conf = attn_per_ch.amax(dim=(2, 3))
-            soft_weights = F.softmax(peak_conf / self.attn_temperature, dim=1)
+            soft_weights = F.softmax(peak_conf.float() / self.attn_temperature, dim=1).to(attn_per_ch.dtype)
             attn_weights = (soft_weights.unsqueeze(-1).unsqueeze(-1) * attn_per_ch).sum(dim=1, keepdim=True)
-        weighted_feat = x * attn_weights
+        
+        # 使用除法归一化，attn_weights已经经过softmax，不需要再次softmax
+        attn_weights_safe = attn_weights + 1e-8
+        attn_weights_norm = attn_weights_safe / (attn_weights_safe.sum(dim=(2, 3), keepdim=True))
+        
+        weighted_feat = x * attn_weights_norm
         pooled = self.attn_pool(weighted_feat).flatten(1)
         hidden = self.feat_proj(pooled)
         cls_out = self.cls_layer(hidden)
         bbox_feat = self.bbox_pool(weighted_feat).flatten(1)
         bbox_out = self.bbox_head(bbox_feat)
         if return_attn:
-            return cls_out, bbox_out, hidden, attn_weights
+            return cls_out, bbox_out, hidden, attn_weights_norm
         return cls_out, bbox_out, hidden
 
 
@@ -80,12 +108,27 @@ class CrossHeadCommLayer(nn.Module):
     def __init__(self, feat_dim, num_heads, pos_channels):
         super().__init__()
         self.num_heads = num_heads
-        self.pos_proj = nn.Conv2d(pos_channels, 32, 1, bias=False)
+        self.pos_proj = nn.Sequential(
+            nn.Conv2d(pos_channels, 32, 1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+        )
         self.comm_conv = nn.Sequential(
             nn.Conv2d(feat_dim + 32 * num_heads, feat_dim, 1, bias=False),
             nn.BatchNorm2d(feat_dim),
             nn.ReLU(inplace=True),
         )
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
 
     def forward(self, feat, pos_embeds):
         B, C, H, W = feat.shape
@@ -105,15 +148,26 @@ class HeadInteractionLayer(nn.Module):
             dropout = config.dropout
         self.num_heads = num_heads
         self.feat_dim = feat_dim
+        self.pos_scale = 1.0
+        
+        self.self_attn = nn.MultiheadAttention(
+            embed_dim=feat_dim, num_heads=nhead, dropout=dropout, batch_first=True
+        )
+        
+        self.norm1 = nn.LayerNorm(feat_dim)
+        self.norm2 = nn.LayerNorm(feat_dim)
+        
+        self.ffn = nn.Sequential(
+            nn.Linear(feat_dim, feat_dim * 4),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(feat_dim * 4, feat_dim),
+            nn.Dropout(dropout)
+        )
+        
         pos_encoding = self._create_sinusoidal_encoding(num_heads, feat_dim)
         self.register_buffer('sinusoidal_pos', pos_encoding)
         self.learnable_pos = nn.Parameter(t.randn(1, num_heads, feat_dim) * 0.02)
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=feat_dim, nhead=nhead,
-            dim_feedforward=feat_dim * 4, dropout=dropout,
-            batch_first=True, norm_first=True
-        )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
     def _create_sinusoidal_encoding(self, num_heads, feat_dim):
         pos = t.arange(num_heads).float().unsqueeze(1)
@@ -124,15 +178,21 @@ class HeadInteractionLayer(nn.Module):
             encoding[0, :, 1::2] = t.cos(pos * div_term)
         else:
             encoding[0, :, 1::2] = t.cos(pos * div_term[:-1])
-        return encoding
+        return encoding / (feat_dim ** 0.5)
 
     def forward(self, head_features):
         B = head_features[0].shape[0]
-        stacked = t.stack(head_features, dim=1)
+        x = t.stack(head_features, dim=1)
         pos_embed = self.sinusoidal_pos + self.learnable_pos
-        stacked = stacked + pos_embed.expand(B, -1, -1)
-        encoded = self.encoder(stacked)
-        return [encoded[:, i, :] for i in range(self.num_heads)]
+        x = x + pos_embed.expand(B, -1, -1)
+        
+        attn_output, _ = self.self_attn(x, x, x)
+        x = self.norm1(x + attn_output)
+        
+        ffn_output = self.ffn(x)
+        x = self.norm2(x + ffn_output)
+        
+        return [x[:, i, :] for i in range(self.num_heads)]
 
 
 class DigitsResnet101(nn.Module):
@@ -167,6 +227,7 @@ class DigitsResnet101(nn.Module):
             self.roi_cls_heads = nn.ModuleList([
                 nn.Linear(config.roi_feat_dim, class_num) for _ in range(num_heads)
             ])
+        self._init_extra_weights()
         self.head_interaction = HeadInteractionLayer(
             config.fc_hidden, num_heads,
             num_layers=config.head_interaction_layers,
@@ -184,6 +245,40 @@ class DigitsResnet101(nn.Module):
             nn.Dropout(config.dropout),
             nn.Linear(64, num_heads + 1),
         )
+
+    def _init_extra_weights(self):
+        """额外的权重初始化，确保关键层的梯度流动"""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                if m.out_features == config.class_num:
+                    nn.init.xavier_uniform_(m.weight, gain=1.0)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                elif 'roi_cls' in str(m) or 'length_head' in str(m):
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+        
+        self._init_roi_weights()
+
+    def _init_roi_weights(self):
+        """专门优化ROI分支的权重初始化，确保梯度流动"""
+        if not self.has_roi:
+            return
+        
+        for i in range(self.num_heads):
+            for m in self.roi_cnn[i].modules():
+                if isinstance(m, nn.Conv2d):
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.Linear):
+                    nn.init.xavier_normal_(m.weight)
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                elif isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
+                    nn.init.ones_(m.weight)
+                    nn.init.zeros_(m.bias)
 
     @t.compiler.disable
     def _extract_roi_feat(self, feat, bbox_pred, head_idx):
@@ -224,7 +319,7 @@ class DigitsResnet101(nn.Module):
         if not self.training:
             refined = []
             for h in range(self.num_heads):
-                p_no_digit = F.softmax(cls_outs[h].detach(), dim=1)[:, 10:11]
+                p_no_digit = F.softmax(cls_outs[h].detach().float(), dim=1)[:, 10:11].to(cls_outs[h].dtype)
                 gated_roi = roi_cls[h] * (1 - p_no_digit)
                 refined.append(cls_outs[h] + gated_roi)
             return tuple(refined)
@@ -239,10 +334,15 @@ class DigitsResnet101(nn.Module):
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         results = []
         use_ckpt = self.training and config.use_gradient_checkpoint and not config.use_torch_compile
-        for head in self.heads:
-            if use_ckpt:
-                results.append(t.utils.checkpoint.checkpoint(head, feat, False, use_reentrant=False))
-            else:
+        if config.use_bf16 and not config.gradient_checkpoint_with_bf16:
+            use_ckpt = False
+        if use_ckpt:
+            for head in self.heads:
+                def forward_fn(x, return_attn=False):
+                    return head(x, return_attn=return_attn)
+                results.append(t.utils.checkpoint.checkpoint(forward_fn, feat, False, use_reentrant=False))
+        else:
+            for head in self.heads:
                 results.append(head(feat))
         bbox_outs = tuple(r[1] for r in results)
         head_feats = [r[2] for r in results]
@@ -257,15 +357,8 @@ class DigitsResnet101(nn.Module):
         feat = self.pre_head_comm(feat, [h.pos_embed for h in self.heads])
         head_cls_outs, bbox_outs, attn_maps = [], [], []
         head_feats = []
-        use_ckpt = self.training and config.use_gradient_checkpoint and not config.use_torch_compile
         for head in self.heads:
-            if use_ckpt:
-                cls_out, bbox_out, hidden, attn = t.utils.checkpoint.checkpoint(
-                    lambda h, f: h(f, return_attn=True), 
-                    head, feat, use_reentrant=False
-                )
-            else:
-                cls_out, bbox_out, hidden, attn = head(feat, return_attn=True)
+            cls_out, bbox_out, hidden, attn = head(feat, return_attn=True)
             head_cls_outs.append(cls_out)
             bbox_outs.append(bbox_out)
             head_feats.append(hidden)
@@ -286,7 +379,7 @@ class DigitsResnet101(nn.Module):
         interacted = self.head_interaction(head_feats)
         cls_outs = tuple(self.head_fc[h](interacted[h]) for h in range(self.num_heads))
         cls_outs = self._apply_roi_refine(feat, cls_outs, bbox_outs)
-        probs = tuple(F.softmax(c, dim=1) for c in cls_outs)
+        probs = tuple(F.softmax(c.float(), dim=1).to(c.dtype) for c in cls_outs)
         pred_length = length_logits.argmax(dim=1)
         for h in range(self.num_heads):
             mask = (pred_length <= h).unsqueeze(1).expand_as(probs[h])

@@ -315,7 +315,16 @@ class ModelEMA:
     def update(self, model):
         with t.no_grad():
             for ema_p, model_p in zip(self.ema.parameters(), model.parameters()):
-                ema_p.data.mul_(self.decay).add_(model_p.data.to(self.device), alpha=1 - self.decay)
+                if ema_p.device != model_p.device:
+                    model_p_data = model_p.data.to(ema_p.device)
+                else:
+                    model_p_data = model_p.data
+                ema_p.data.mul_(self.decay).add_(model_p_data, alpha=1 - self.decay)
+            for ema_b, model_b in zip(self.ema.buffers(), model.buffers()):
+                if ema_b.device != model_b.device:
+                    ema_b.data.copy_(model_b.data.to(ema_b.device))
+                else:
+                    ema_b.data.copy_(model_b.data)
 
     def to_device(self, device=None):
         target_device = device or self.device
@@ -339,6 +348,7 @@ class BaseTrainer:
     def __init__(self):
         self.device = t.device('cuda') if t.cuda.is_available() else t.device('cpu')
         self.use_amp = getattr(config, 'use_amp', True) and self.device.type == 'cuda'
+        self.use_bf16 = getattr(config, 'use_bf16', False) and self.use_amp
         self.best_acc = 0
         self.best_checkpoint_path = ''
         self.train_log = []
@@ -435,12 +445,31 @@ class BaseTrainer:
             config.multiprocessing_context = None
 
     def _setup_optimizer(self, backbone_params, other_params):
+        def separate_params(params):
+            decay_params = []
+            no_decay_params = []
+            for p in params:
+                if p.dim() >= 2:
+                    decay_params.append(p)
+                else:
+                    no_decay_params.append(p)
+            return decay_params, no_decay_params
+        
+        bb_decay, bb_no_decay = separate_params(backbone_params)
+        other_decay, other_no_decay = separate_params(other_params)
+        
         if config.optimizer_type == 'adamw':
             from torch.optim import AdamW
             return AdamW([
-                {'params': backbone_params, 'lr': config.lr * config.backbone_lr_factor},
-                {'params': other_params, 'lr': config.lr},
-            ], weight_decay=config.weights_decay)
+                {'params': bb_decay, 'lr': config.lr * config.backbone_lr_factor, 
+                'weight_decay': config.weights_decay, 'betas': (0.9, 0.999)},
+                {'params': bb_no_decay, 'lr': config.lr * config.backbone_lr_factor, 
+                'weight_decay': 0.0, 'betas': (0.9, 0.999)},
+                {'params': other_decay, 'lr': config.lr, 
+                'weight_decay': config.weights_decay, 'betas': (0.9, 0.999)},
+                {'params': other_no_decay, 'lr': config.lr, 
+                'weight_decay': 0.0, 'betas': (0.9, 0.999)},
+            ], eps=1e-8)
         return SGD([
             {'params': backbone_params, 'lr': config.lr * config.backbone_lr_factor},
             {'params': other_params, 'lr': config.lr},
@@ -472,10 +501,10 @@ class BaseTrainer:
         )
 
     def _setup_scaler(self, init_scale=None):
-        if init_scale is not None:
-            scaler = GradScaler(self.device.type, enabled=self.use_amp, init_scale=init_scale, growth_interval=500)
-        else:
-            scaler = GradScaler(self.device.type, enabled=self.use_amp, init_scale=2**8, growth_interval=500)
+        if self.use_bf16:
+            return GradScaler(self.device.type, enabled=False)
+        scale = init_scale if init_scale is not None else 2**4
+        scaler = GradScaler(self.device.type, enabled=self.use_amp, init_scale=scale, growth_interval=100)
         return scaler
 
     def _pre_epoch_hook(self, epoch):
@@ -523,9 +552,6 @@ class BaseTrainer:
                 break
 
             self._current_epoch = epoch
-
-            if epoch > 0:
-                self.lr_scheduler.step()
 
             if hasattr(self, '_post_reset_warmup_epochs') and self._post_reset_warmup_epochs > 0:
                 total_warmup = 10
@@ -608,6 +634,8 @@ class BaseTrainer:
                 else:
                     raise
             self._oom_retry_count = 0
+
+            self.lr_scheduler.step()
 
             if hasattr(self, '_last_epoch_avg_loss') and hasattr(self, '_prev_epoch_avg_loss'):
                 if self._last_epoch_avg_loss > self._prev_epoch_avg_loss * 3.0 and self._prev_epoch_avg_loss > 0:

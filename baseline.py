@@ -570,7 +570,7 @@ class AttentionSupervisionLoss(nn.Module):
         因此应该传入: F.kl_div(pred.log(), gt)
         """
         if attn_maps is None or len(attn_maps) == 0:
-            return t.tensor(0.0, device=bbox_target.device, requires_grad=True)
+            return t.tensor(0.0, device=bbox_target.device)
         B, N, _ = bbox_target.shape
         H, W = attn_maps[0].shape[2], attn_maps[0].shape[3]
         gt_gauss = generate_gaussian_attn_target(bbox_target, bbox_mask, H, W, device=attn_maps[0].device)
@@ -588,7 +588,7 @@ class AttentionSupervisionLoss(nn.Module):
             loss = loss + F.kl_div(pred_h.clamp(min=1e-8).log(), gt_h, reduction='batchmean')
             count += 1
         if count == 0:
-            return t.tensor(0.0, device=bbox_target.device, requires_grad=True)
+            return t.tensor(0.0, device=bbox_target.device)
         return loss / count
 
 
@@ -909,7 +909,7 @@ def create_model(model_type=None):
 
 def attention_diversity_loss(attn_maps):
     if attn_maps is None or len(attn_maps) < 2:
-        return t.tensor(0.0, device='cuda' if t.cuda.is_available() else 'cpu', requires_grad=True)
+        return t.tensor(0.0, device='cuda' if t.cuda.is_available() else 'cpu')
     n = len(attn_maps)
     loss = 0.0
     for i in range(n):
@@ -925,7 +925,7 @@ def spatial_ordering_loss(attn_maps, bbox_preds=None, bbox_mask=None):
     改进的空间排序损失：同时考虑attention maps和bbox预测的几何一致性
     """
     if attn_maps is None or len(attn_maps) < 2:
-        return t.tensor(0.0, device='cuda' if t.cuda.is_available() else 'cpu', requires_grad=True)
+        return t.tensor(0.0, device='cuda' if t.cuda.is_available() else 'cpu')
     
     loss = t.tensor(0.0, device=attn_maps[0].device)
     
@@ -1055,6 +1055,7 @@ class Trainer:
         self.device = t.device('cuda') if t.cuda.is_available() else t.device('cpu')
         print(f'Using device: {self.device}')
         self.use_amp = self.device.type == 'cuda'
+        self.use_bf16 = getattr(config, 'use_bf16', False) and self.use_amp
         self.model_type = model_type or config.model_type
         
         self._base_seed = 42
@@ -1109,7 +1110,7 @@ class Trainer:
                                          schedulers=[warmup_scheduler, cosine_scheduler],
                                          milestones=[config.warmup_epochs])
 
-        self.scaler = GradScaler('cuda', enabled=self.use_amp)
+        self.scaler = GradScaler('cuda', enabled=self.use_amp and not self.use_bf16)
         self.best_acc = 0
         self.best_checkpoint_path = ''
         self.train_log = []
@@ -1290,14 +1291,14 @@ class Trainer:
             
             self.optimizer.zero_grad()
 
-            with autocast('cuda', enabled=self.use_amp):
+            with autocast('cuda', enabled=self.use_amp, dtype=t.bfloat16 if self.use_bf16 else t.float16):
                 pred, pred_bboxes, attn_maps = self.model.forward_with_attn(img, gt_bboxes=bbox_target)
                 
                 # 动态掩码：根据bbox_mask计算每个样本的真实长度
                 true_lengths = bbox_mask.sum(dim=1).long()  # [B]
                 
                 # 分类损失：只对有效的head计算损失
-                cls_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                cls_loss = t.tensor(0.0, device=self.device)
                 for h in range(config.num_heads):
                     # 创建mask：只有当该head位置有真实字符时才计算损失
                     valid_mask = (true_lengths > h).float()  # [B], 1 if head h is valid
@@ -1313,16 +1314,16 @@ class Trainer:
                         cls_loss = cls_loss + (head_loss * valid_mask).sum() / valid_mask.sum()
                 
                 if use_cutmix:
-                    div_loss = t.tensor(0.0, device=self.device, requires_grad=True)
-                    attn_sup_loss = t.tensor(0.0, device=self.device, requires_grad=True)
-                    ord_loss = t.tensor(0.0, device=self.device, requires_grad=True)
-                    bbox_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    div_loss = t.tensor(0.0, device=self.device)
+                    attn_sup_loss = t.tensor(0.0, device=self.device)
+                    ord_loss = t.tensor(0.0, device=self.device)
+                    bbox_loss = t.tensor(0.0, device=self.device)
                 else:
                     div_loss = attention_diversity_loss(attn_maps)
                     # 改进：传入bbox预测和mask以增强几何一致性约束
                     ord_loss = spatial_ordering_loss(attn_maps, bbox_preds=pred_bboxes, bbox_mask=bbox_mask)
                     attn_sup_loss = self.attn_supervision(attn_maps, bbox_target, bbox_mask)
-                    bbox_loss = t.tensor(0.0, device=self.device, requires_grad=True)
+                    bbox_loss = t.tensor(0.0, device=self.device)
                     valid_bbox_sum = (bbox_target * bbox_mask.unsqueeze(-1)).sum(dim=1)
                     valid_bbox_count = bbox_mask.sum(dim=1, keepdim=True).clamp(min=1)
                     mean_bbox = valid_bbox_sum / valid_bbox_count
@@ -1909,6 +1910,7 @@ class CTCTrainer:
         self.device = t.device('cuda') if t.cuda.is_available() else t.device('cpu')
         print(f'CTC Model - Using device: {self.device}')
         self.use_amp = self.device.type == 'cuda'
+        self.use_bf16 = getattr(config, 'use_bf16', False) and self.use_amp
         self.train_set = CTCDataset(mode='train', aug=True,
                                     input_size=(config.input_height, config.input_width))
         self.train_loader = DataLoader(self.train_set, batch_size=config.batch_size, shuffle=True,
@@ -1948,7 +1950,7 @@ class CTCTrainer:
                                          schedulers=[warmup_scheduler, cosine_scheduler],
                                          milestones=[config.warmup_epochs])
 
-        self.scaler = GradScaler('cuda', enabled=self.use_amp)
+        self.scaler = GradScaler('cuda', enabled=self.use_amp and not self.use_bf16)
         self.best_acc = 0
         self.best_checkpoint_path = ''
         self.train_log = []
@@ -2016,7 +2018,7 @@ class CTCTrainer:
             label_concat = label_concat.to(self.device)
             self.optimizer.zero_grad()
 
-            with autocast('cuda', enabled=self.use_amp):
+            with autocast('cuda', enabled=self.use_amp, dtype=t.bfloat16 if self.use_bf16 else t.float16):
                 log_probs = self.model(img)
                 T = log_probs.size(0)
                 B = log_probs.size(1)

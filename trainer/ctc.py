@@ -238,7 +238,7 @@ class CTCTrainer(BaseTrainer):
         try:
             with self._compile_logger.phase('warmup_ctc_inference'):
                 dummy = t.randn(warmup_bs, 3, config.input_height, config.input_width, device=self.device)
-                with t.no_grad(), autocast(self.device.type, enabled=self.use_amp):
+                with t.no_grad(), autocast(self.device.type, enabled=self.use_amp, dtype=t.bfloat16 if self.use_bf16 else t.float16):
                     _ = self.model(dummy)
                 t.cuda.synchronize()
                 del dummy
@@ -295,7 +295,7 @@ class CTCTrainer(BaseTrainer):
             if i % config.grad_accum_steps == 0:
                 self.optimizer.zero_grad()
 
-            with autocast(self.device.type, enabled=self.use_amp):
+            with autocast(self.device.type, enabled=self.use_amp, dtype=t.bfloat16 if self.use_bf16 else t.float16):
                 log_probs = self.model(img)
                 T = log_probs.size(0)
                 B = log_probs.size(1)

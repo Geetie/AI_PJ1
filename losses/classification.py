@@ -30,13 +30,23 @@ class LabelSmoothEntropy(nn.Module):
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, gamma=2.0, weight=None):
+    def __init__(self, gamma=2.0, weight=None, reduction='mean'):
         super(FocalLoss, self).__init__()
         self.gamma = gamma
         self.weight = weight
+        self.reduction = reduction
 
     def forward(self, preds, targets):
         ce_loss = F.cross_entropy(preds, targets, weight=self.weight, reduction='none')
-        pt = t.exp(-ce_loss)
-        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
-        return focal_loss.mean()
+        pt = t.clamp(t.exp(-ce_loss), min=1e-8, max=1 - 1e-8)
+        focal_weight = (1 - pt) ** self.gamma
+        focal_loss = focal_weight * ce_loss
+        
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        elif self.reduction == 'none':
+            return focal_loss
+        else:
+            raise ValueError(f"Invalid reduction mode: {self.reduction}")
